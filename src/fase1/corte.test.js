@@ -1,0 +1,112 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { agruparEmFalas, marcarDescartes, classificarBlocos, corteOrganico } from './corte.js';
+
+/** Helper: monta palavras a partir de "texto@inicio-fim". */
+const p = (texto, inicio, fim) => ({ texto, inicio, fim });
+
+test('agrupa em falas quebrando por pausa e por fim de frase', () => {
+  const falas = agruparEmFalas([
+    p('Oi', 0, 0.3), p('gente.', 0.3, 0.8),
+    p('Hoje', 0.9, 1.2), p('eu', 1.2, 1.35), p('vou', 1.35, 1.6),
+    p('contar', 3.0, 3.5),
+  ]);
+  assert.equal(falas.length, 3);
+  assert.equal(falas[0].texto, 'Oi gente.');
+  assert.equal(falas[2].texto, 'contar');
+});
+
+test('descarta respiro solto e muleta', () => {
+  const falas = marcarDescartes(agruparEmFalas([
+    p('Ah', 0, 0.15),
+    p('Entao', 1.0, 1.4), p('gente,', 1.4, 1.9),
+  ]));
+  assert.equal(falas[0].descartar, true);
+  assert.ok(falas[0].motivos.includes('respiro'));
+  assert.equal(falas[1].descartar, false);
+});
+
+test('descarta falso comeco quando a fala seguinte engloba a anterior', () => {
+  const falas = marcarDescartes(agruparEmFalas([
+    p('O', 0, 0.2), p('segredo', 0.2, 0.8), p('e.', 0.8, 1.0),
+    p('O', 2.0, 2.2), p('segredo', 2.2, 2.8), p('e', 2.8, 3.0),
+    p('acordar', 3.0, 3.5), p('cedo', 3.5, 4.0), p('todo', 4.0, 4.3), p('dia.', 4.3, 4.7),
+  ]));
+  assert.equal(falas[0].descartar, true);
+  assert.ok(falas[0].motivos.some((m) => m === 'false-start' || m === 'tomada-refeita'));
+  assert.equal(falas.at(-1).descartar, false);
+});
+
+test('descarta tomada repetida identica', () => {
+  const falas = marcarDescartes(agruparEmFalas([
+    p('Isso', 0, 0.4), p('muda', 0.4, 0.8), p('tudo.', 0.8, 1.2),
+    p('Isso', 3.0, 3.4), p('muda', 3.4, 3.8), p('tudo.', 3.8, 4.2),
+  ]));
+  assert.equal(falas[0].descartar, true);
+  assert.equal(falas[1].descartar, false);
+});
+
+test('blocos nunca voltam atras', () => {
+  const clipes = classificarBlocos([
+    { duracao: 2, texto: 'Olha isso aqui' },
+    { duracao: 2, texto: 'entao funciona assim' },
+    { duracao: 2, texto: 'clica no link na bio' },
+    { duracao: 2, texto: 'e tambem serve pra outra coisa' },
+    { duracao: 2, texto: 'comenta aqui embaixo' },
+  ]);
+  const ordem = ['HOOK', 'DINAMICA', 'RECURSOS', 'CTA'];
+  const idx = clipes.map((c) => ordem.indexOf(c.bloco));
+  assert.deepEqual(idx, [...idx].sort((a, b) => a - b), `blocos fora de ordem: ${idx}`);
+  assert.equal(clipes[0].bloco, 'HOOK');
+  assert.equal(clipes.at(-1).bloco, 'CTA');
+});
+
+test('pipeline completo remove o descarte da linha do tempo', () => {
+  const palavras = [
+    p('Ah', 0, 0.12),
+    p('O', 1.0, 1.2), p('setup', 1.2, 1.8), p('e.', 1.8, 2.0),
+    p('O', 3.0, 3.2), p('setup', 3.2, 3.8), p('e', 3.8, 4.0),
+    p('esse', 4.0, 4.4), p('aqui', 4.4, 4.8), p('mesmo.', 4.8, 5.3),
+    p('Comenta', 7.0, 7.6), p('aqui', 7.6, 8.0), p('embaixo.', 8.0, 8.6),
+  ];
+  const r = corteOrganico(palavras, 9);
+  const textos = r.clipes.map((c) => c.texto).join(' | ');
+  assert.ok(!/^Ah/.test(textos), 'o respiro inicial deveria ter sumido');
+  assert.ok(r.descartados.length >= 1);
+  assert.ok(r.clipes.every((c) => c.duracao > 0));
+  // Nenhum clipe pode invadir o vizinho.
+  for (let i = 1; i < r.clipes.length; i++) {
+    assert.ok(r.clipes[i].origemInicio >= r.clipes[i - 1].origemFim,
+      `clipe ${i} comeca antes do fim do anterior`);
+  }
+});
+
+test('corta pelo silencio real quando o Whisper nao devolve pontuacao', () => {
+  // Como o whisper.cpp realmente emite: palavras coladas, fim de uma = inicio
+  // da outra, e sem ponto nenhum. Foi o que deixou um video de 42s num clipe so.
+  const palavras = [];
+  let t = 0;
+  for (const w of ['Toda', 'vez', 'que', 'voce', 'fala', 'que', 'nao', 'tem', 'gente',
+    'as', 'coisas', 'nao', 'acontecem', 'no', 'seu', 'negocio']) {
+    palavras.push(p(w, t, t + 0.4));
+    t += 0.4;
+  }
+  // Dois silencios de verdade no audio, que o Whisper nao reportou.
+  const silencios = [{ inicio: 3.6, fim: 4.2 }, { inicio: 5.2, fim: 5.9 }];
+
+  const semSilencio = agruparEmFalas(palavras, { silencios: [] });
+  const comSilencio = agruparEmFalas(palavras, { silencios });
+
+  assert.ok(comSilencio.length > semSilencio.length,
+    `o silencio deveria gerar mais falas (${comSilencio.length} vs ${semSilencio.length})`);
+  assert.ok(comSilencio.length >= 3, `esperava 3+ falas, veio ${comSilencio.length}`);
+});
+
+test('fala longa sem pontuacao nem silencio ainda assim e quebrada', () => {
+  const palavras = [];
+  for (let i = 0; i < 60; i++) palavras.push(p(`w${i}`, i * 0.4, i * 0.4 + 0.4));
+  const falas = agruparEmFalas(palavras, { silencios: [] });
+  assert.ok(falas.length >= 3, `24s num clipe so: veio ${falas.length} fala(s)`);
+  assert.ok(falas.every((f) => f.fim - f.inicio <= 7.5),
+    'nenhuma fala pode passar da trava de 7s');
+});

@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edvid — Preview</title>
+<style>
+  /* ==========================================================================
+     Escala.
+     A referencia e um app encorpado: cabecalho, abas e transporte ocupam
+     ~2,4x mais altura (em relacao a largura) do que uma UI de ferramenta densa.
+     Tudo aqui e em rem, entao mudar --e reescala a interface inteira.
+     ========================================================================== */
+
+  /* Fontes de legenda. Servidas daqui para o preview; tambem instaladas em
+     ~/Library/Fonts para o Chrome headless do Remotion achar no render. */
+  @font-face{font-family:Montserrat;src:url(/fontes/Montserrat.ttf) format('truetype');
+    font-weight:100 900;font-display:swap}
+  @font-face{font-family:Poppins;src:url(/fontes/Poppins-Bold.ttf) format('truetype');
+    font-weight:700;font-display:swap}
+  @font-face{font-family:Poppins;src:url(/fontes/Poppins-ExtraBold.ttf) format('truetype');
+    font-weight:800;font-display:swap}
+  @font-face{font-family:Anton;src:url(/fontes/Anton.ttf) format('truetype');font-display:swap}
+  @font-face{font-family:"Bebas Neue";src:url(/fontes/BebasNeue.ttf) format('truetype');font-display:swap}
+  @font-face{font-family:"Archivo Black";src:url(/fontes/ArchivoBlack.ttf) format('truetype');font-display:swap}
+  @font-face{font-family:"Luckiest Guy";src:url(/fontes/LuckiestGuy.ttf) format('truetype');font-display:swap}
+
+  :root{
+    --e:1;
+
+    --fundo:#0a0f17;
+    --painel:#121a28;
+    --painel2:#18202f;
+    --interno:#070b12;
+    --borda:#24304a;
+    --borda-forte:#2c3a58;
+    --texto:#eef2fa;
+    --fraco:#8494b0;
+    --laranja:#f97a1e;
+    --rosa:#f73d9e;
+    --teal:#38d6d2;
+    --lima:#c2e84d;
+    --destaque:#ff5200;
+    --hook:#f73d9e; --dinamica:#f97a1e; --recursos:#38d6d2; --cta:#8b6bff;
+
+    --r:1.15rem;      /* raio dos paineis */
+    --r-p:.75rem;     /* raio dos controles */
+  }
+  html{font-size:calc(16px * var(--e))}
+  *{box-sizing:border-box}
+  /* A tela inteira cabe numa dobra: o body tem a altura da janela e quem rola
+     e o miolo de cada aba, nunca a pagina. */
+  body{margin:0 auto;max-width:110rem;background:var(--fundo);color:var(--texto);
+    font:1rem/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    padding:.7rem .8rem 2.4rem;height:100vh;overflow:hidden;
+    display:flex;flex-direction:column}
+  button{font:inherit;color:inherit;cursor:pointer;background:none;border:none}
+
+  .painel{background:var(--painel);border:1px solid var(--borda);border-radius:var(--r)}
+
+  /* ============================ topo ============================ */
+  .topo{display:flex;align-items:center;gap:1.2rem;padding:.9rem 1.2rem;
+    margin-bottom:.6rem;flex:0 0 auto}
+  .marca{flex:0 0 auto;display:flex}
+  .marca svg{height:2.9rem;width:auto;display:block}
+  .tituloProjeto{font:800 1.45rem/1.2 sans-serif;letter-spacing:-.02em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52vw}
+  .subProjeto{color:var(--fraco);font-size:1rem;margin-top:.3rem}
+  select{background:var(--painel2);border:1px solid var(--borda);color:var(--texto);
+    padding:.8rem 1rem;border-radius:var(--r-p);font:600 1.02rem/1 inherit}
+
+  /* ============================ abas ============================ */
+  .abas{display:flex;gap:.6rem;margin-bottom:.6rem;flex:0 0 auto}
+  .abas button{background:var(--painel);border:1px solid var(--borda);border-radius:var(--r);
+    padding:.95rem 1.6rem;display:flex;align-items:baseline;gap:.7rem;color:var(--fraco)}
+  .abas button .fase{font:800 .82rem/1 sans-serif;letter-spacing:.14em;color:var(--fraco)}
+  .abas button .nome{font:700 1.22rem/1 sans-serif;letter-spacing:-.02em}
+  .abas button.on{background:var(--painel2);border-color:var(--borda-forte);color:var(--texto)}
+  .abas button.on .fase{color:var(--laranja)}
+  .abas button:disabled{opacity:.45;cursor:not-allowed}
+
+  /* ============================ fase 1 ============================ */
+  /* A coluna da direita e `auto`: o video define a largura a partir da altura
+     da tela, entao o preview sai do tamanho maximo possivel sem distorcer. */
+  .palco{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.8rem;
+    align-items:stretch;flex:1;min-height:0}
+
+  .transporte{display:flex;align-items:center;gap:1rem;padding:1.1rem 1.2rem;
+    margin-bottom:.8rem;min-width:0}
+  .bt{flex:0 0 auto;width:3.5rem;height:3rem;border-radius:var(--r-p);background:var(--painel2);
+    border:1px solid var(--borda);display:grid;place-items:center;color:var(--texto)}
+  .bt svg{width:1.15rem;height:1.15rem}
+  .bt:hover{border-color:#3a4d75}
+  .tempo{font:600 1.25rem/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    letter-spacing:.04em;white-space:nowrap}
+  .tempo b{color:var(--fraco);font-weight:600;margin:0 .5rem}
+  .tempo .total{color:var(--fraco)}
+  .marcaIn{flex:0 0 auto;border:.1rem solid var(--rosa);color:var(--rosa);border-radius:var(--r-p);
+    padding:.7rem 1.15rem;font:800 .92rem/1 sans-serif;letter-spacing:.14em;
+    display:flex;align-items:center;gap:.6rem;box-shadow:0 0 1.1rem rgba(255,45,138,.24)}
+  .marcaIn svg{width:.9rem;height:1rem}
+  .marcaIn.on{background:var(--rosa);color:#fff}
+  /* O slider encolhe junto com a coluna, senao o botao de ajustar sai da barra. */
+  .zoomBox{margin-left:auto;display:flex;align-items:center;gap:.8rem;min-width:0;
+    flex:1 1 auto;color:var(--fraco);font-size:.95rem}
+  .zoomBox input[type=range]{flex:1 1 auto;min-width:3rem}
+  input[type=range]{-webkit-appearance:none;width:15rem;height:.28rem;border-radius:.14rem;
+    background:#26355a;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:1.35rem;height:1.35rem;
+    border-radius:50%;background:var(--laranja);cursor:pointer;
+    box-shadow:0 0 .8rem rgba(255,106,43,.6)}
+
+  .caixaTrilhas{padding:.9rem 1rem 1rem;position:relative;overflow:hidden}
+  .trilhas{position:relative;overflow-x:auto;overflow-y:hidden;padding-bottom:.15rem}
+  .trilhas::-webkit-scrollbar{height:.5rem}
+  .trilhas::-webkit-scrollbar-thumb{background:#26355a;border-radius:.25rem}
+
+  .regua{position:relative;height:1.7rem;color:var(--fraco);
+    font:500 .82rem/1 ui-monospace,Menlo,monospace;margin-bottom:.4rem;cursor:pointer}
+  .regua i{position:absolute;top:.15rem;font-style:normal}
+  .regua i::after{content:'';position:absolute;left:0;top:1.05rem;
+    width:1px;height:.5rem;background:#33456a}
+  .regua u{position:absolute;top:1.2rem;width:1px;height:.3rem;
+    background:#233149;text-decoration:none}
+
+  .trilhaMarca{position:relative;height:2.2rem;border:1px solid rgba(255,45,138,.34);
+    border-radius:.6rem;background:rgba(255,45,138,.08);margin-bottom:.5rem}
+  .pinoMarca{position:absolute;top:.2rem;bottom:.2rem;width:.16rem;background:var(--rosa);
+    box-shadow:0 0 .6rem rgba(255,45,138,.8)}
+  .pinoMarca::before{content:'';position:absolute;top:0;left:0;width:.8rem;height:.6rem;
+    background:var(--rosa);border-radius:0 .1rem .1rem 0}
+
+  .trilhaClipes{position:relative;height:4.9rem;margin-bottom:.5rem}
+  .clipe{position:absolute;top:0;height:4.9rem;border-radius:.6rem;overflow:hidden;
+    border:1px solid #56658a;cursor:pointer;
+    background:#0b111c center/auto 100% repeat-x}
+  /* Veu leve so para o texto ler; na referencia a miniatura aparece clara. */
+  .clipe::before{content:'';position:absolute;inset:0;
+    background:linear-gradient(180deg,rgba(3,6,12,.42) 0 26%,rgba(3,6,12,0) 52%,rgba(3,6,12,.4))}
+  .clipe.sel{outline:.14rem solid #fff;outline-offset:-.14rem}
+  .clipe.off{opacity:.3;filter:grayscale(1)}
+  /* Alças de aparar: só aparecem no clipe sob o mouse, para não poluir. */
+  .alca{position:absolute;top:0;bottom:0;width:.55rem;z-index:3;cursor:col-resize;
+    opacity:0;transition:opacity .12s;background:var(--laranja);
+    box-shadow:0 0 .5rem rgba(255,106,43,.9)}
+  .alca.ini{left:0;border-radius:.5rem 0 0 .5rem}
+  .alca.fim{right:0;border-radius:0 .5rem .5rem 0}
+  .clipe:hover .alca{opacity:.9}
+  .alca:hover{opacity:1 !important}
+  .clipe .tag{position:absolute;top:.4rem;left:.5rem;font:800 .72rem/1 sans-serif;
+    letter-spacing:.1em;color:#eef2fa;text-shadow:0 1px .3rem #000,0 0 .15rem #000}
+  .clipe .dur{position:absolute;bottom:.4rem;right:.55rem;font:700 .85rem/1 sans-serif;
+    color:#fff;text-shadow:0 1px .25rem #000}
+
+  .trilhaOnda{height:4.2rem;border-radius:.6rem;background:var(--interno);
+    border:1px solid var(--borda);display:flex;align-items:center;gap:.1rem;
+    padding:0 .4rem;overflow:hidden}
+  .trilhaOnda i{flex:0 0 auto;width:.13rem;background:var(--lima);border-radius:.07rem;
+    box-shadow:0 0 .3rem rgba(182,232,42,.45)}
+
+  /* A agulha e arrastavel: a haste e fina, mas o alvo do mouse e largo. */
+  .cabecote{position:absolute;top:0;bottom:0;width:.17rem;background:var(--laranja);
+    z-index:7;box-shadow:0 0 .7rem rgba(255,106,43,.85);cursor:ew-resize;touch-action:none}
+  .cabecote::before{content:'';position:absolute;top:-.15rem;left:-.42rem;
+    width:1rem;height:.85rem;background:var(--laranja);
+    clip-path:polygon(0 0,100% 0,50% 100%);border-radius:.12rem}
+  .cabecote::after{content:'';position:absolute;top:0;bottom:0;left:-.55rem;right:-.55rem}
+  .cabecote.arrastando{box-shadow:0 0 1.2rem rgba(255,106,43,1)}
+  .pista{position:relative;cursor:text}
+
+  .previa{padding:.5rem;display:flex;flex-direction:column;gap:.4rem;min-height:0}
+  .previa video{flex:1;min-height:0;width:auto;max-width:34vw;
+    border-radius:.7rem;background:#000;display:block;margin:0 auto}
+  .previa .legendaPrev{color:var(--fraco);font-size:.9rem;text-align:center}
+
+  .acoes{display:flex;gap:.7rem;align-items:center;margin-top:.8rem;flex-wrap:wrap}
+  .btn{border:1px solid var(--borda);background:var(--painel2);padding:.82rem 1.25rem;
+    border-radius:var(--r-p);font:700 .98rem/1 inherit}
+  .btn.primario{background:var(--laranja);border-color:var(--laranja);color:#1a0a02}
+  .btn:hover{filter:brightness(1.08)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  .fichaClipe{padding:1.1rem 1.3rem;margin-top:.8rem}
+  .fichaClipe .quem{color:var(--fraco);font:800 .82rem/1 sans-serif;
+    letter-spacing:.14em;margin-bottom:.7rem}
+  .fichaClipe .fala{font-size:1.12rem;margin-bottom:.9rem}
+  .escolhaBloco{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+  .escolhaBloco button{border:1px solid var(--borda);background:var(--interno);
+    padding:.6rem 1rem;border-radius:.55rem;font:800 .82rem/1 sans-serif;letter-spacing:.08em}
+
+  .removidos{margin-top:.8rem;padding:1.1rem 1.3rem;color:var(--fraco);font-size:1rem}
+  .removidos b{color:var(--texto)}
+  .removidos ul{margin:.5rem 0 0;padding-left:1.2rem}
+  .removidos code{color:var(--rosa);font-size:.92rem}
+
+  /* ============================ estilo ============================ */
+  .tituloEstilo{font:800 1.35rem/1.2 sans-serif;letter-spacing:-.02em;margin:.3rem 0 1.4rem}
+  .grupo{margin-bottom:1.8rem}
+  .rotulo{font:800 .8rem/1 sans-serif;letter-spacing:.16em;margin-bottom:.75rem;
+    display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap}
+  .rotulo em{font:400 .88rem/1 sans-serif;letter-spacing:0;font-style:normal;color:var(--fraco)}
+
+  .cards{display:flex;gap:.9rem;flex-wrap:wrap}
+  .card{position:relative;width:8.4rem;padding:.85rem .85rem .7rem;border-radius:var(--r);
+    background:var(--painel);border:.14rem solid var(--borda);text-align:center;cursor:pointer}
+  .card.on{border-color:var(--laranja);box-shadow:0 0 0 1px var(--laranja),0 0 1.4rem rgba(255,106,43,.2)}
+  .card .nome{font-size:.86rem;margin-top:.55rem}
+  .fone{position:relative;height:8.2rem;border-radius:.75rem;background:var(--interno);
+    border:1px solid #26324c;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:.45rem;padding:.6rem;overflow:hidden}
+  .fone .cabeca{width:2.2rem;height:2.2rem;border-radius:50%;background:#59677f}
+  .fone .imagem{width:4.7rem;height:2.4rem;border-radius:.35rem;background:var(--laranja);
+    display:grid;place-items:center;color:#2a0f00;font-size:1.05rem}
+  .fone .legendaMini{width:4.9rem;height:.72rem;border-radius:.4rem;
+    border:.1rem solid var(--teal);display:flex;align-items:center;justify-content:center;gap:.2rem}
+  .fone .legendaMini s{width:.55rem;height:.18rem;background:var(--teal);
+    border-radius:.1rem;text-decoration:none}
+  .fone .divisor{width:100%;height:.1rem;background:#fff;opacity:.85}
+  .fone .barras{position:absolute;top:.6rem;left:.75rem;display:flex;flex-direction:column;gap:.25rem}
+  .fone .barras s{display:block;height:.32rem;border-radius:.16rem;background:#dfe6f2;
+    text-decoration:none}
+  .marcaSel{position:absolute;top:.65rem;right:.65rem;width:1.35rem;height:1.35rem;
+    border-radius:50%;border:.14rem solid #3a4d75;background:transparent;z-index:2;
+    display:grid;place-items:center;font-size:.8rem;font-weight:900;color:transparent}
+  .card.on .marcaSel,.preset.on .marcaSel{background:var(--laranja);
+    border-color:var(--laranja);color:#1a0a02}
+
+  .corLinha{display:flex;align-items:center;gap:1rem}
+  .botaoCor{position:relative;width:2.7rem;height:2.7rem;border-radius:.9rem;padding:0;
+    background:conic-gradient(from 200deg,#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75);
+    display:grid;place-items:center;cursor:pointer}
+  .botaoCor i{width:1.35rem;height:1.35rem;border-radius:50%;background:var(--destaque);
+    display:block;box-shadow:0 0 0 .18rem var(--painel)}
+  .botaoCor input{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .hex{background:var(--painel);border:1px solid var(--borda);color:var(--texto);
+    border-radius:var(--r-p);padding:.8rem 1rem;width:9.5rem;
+    font:600 1rem/1 ui-monospace,Menlo,monospace;letter-spacing:.04em}
+
+  .presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.9rem;max-width:62rem}
+  .preset{position:relative;border-radius:var(--r);background:var(--painel);
+    border:.12rem solid var(--borda);padding:.7rem;min-height:5.2rem;
+    display:grid;place-items:center;cursor:pointer}
+  .preset.on{border-color:var(--laranja);box-shadow:0 0 0 1px var(--laranja),0 0 1.4rem rgba(255,106,43,.2)}
+  .amostra{background:#000;border-radius:.7rem;width:100%;min-height:3.8rem;
+    display:grid;place-items:center;padding:.55rem;text-align:center;
+    font:.88rem/1.3 Inter,-apple-system,Helvetica,Arial,sans-serif}
+
+  .toggles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;max-width:62rem}
+  .toggle{display:flex;align-items:center;gap:.7rem;border:.1rem solid var(--borda);
+    background:var(--painel);border-radius:.75rem;padding:.72rem 1rem;
+    font-size:.95rem;cursor:pointer}
+  .toggle.on{border-color:var(--teal);color:var(--teal);box-shadow:0 0 1rem rgba(43,224,200,.16)}
+  .caixa{width:1.3rem;height:1.3rem;border-radius:.36rem;border:.14rem solid #3a4d75;
+    display:grid;place-items:center;font-size:.8rem;font-weight:900;color:transparent;flex:0 0 auto}
+  .toggle.on .caixa{background:var(--teal);border-color:var(--teal);color:#062019}
+  .toggle .ic{opacity:.85;flex:0 0 auto;display:grid;place-items:center;width:1.15rem}
+  .toggle .ic svg{width:1.05rem;height:1.05rem}
+
+  .obs{width:100%;background:var(--painel);border:1px solid var(--borda);
+    border-radius:.75rem;color:var(--texto);padding:.8rem 1rem;font:.95rem/1.4 inherit;
+    max-width:62rem}
+  .obs::placeholder{color:#5b6b87}
+  .resumo{display:flex;align-items:center;gap:.6rem;color:var(--fraco);
+    font-size:.98rem;margin-top:.8rem}
+  .resumo .bolinha{width:1.3rem;height:1.3rem;border-radius:50%;border:1px solid var(--borda);
+    display:grid;place-items:center;font-size:.82rem;flex:0 0 auto}
+
+  .vazio{color:var(--fraco);padding:4rem 1.2rem;text-align:center;line-height:1.7;font-size:1.08rem}
+
+  /* ============================ fase 2 / projetos ============================ */
+  .linhaArquivo{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
+  .tirinha{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem}
+  .tirinha img{width:3.6rem;height:6.4rem;object-fit:cover;border-radius:.5rem;
+    border:1px solid var(--borda)}
+  .contador{background:var(--laranja);color:#1a0a02;border-radius:999px;
+    padding:.15rem .55rem;font:800 .82rem/1.5 sans-serif;margin-left:.5rem}
+  .contador:empty{display:none}
+
+  .solta{border:.14rem dashed #2b3854;border-radius:var(--r);background:var(--painel);
+    padding:2.4rem 1.2rem;text-align:center;transition:border-color .15s,background .15s}
+  .solta.sobre{border-color:var(--laranja);background:var(--painel2)}
+  .soltaTexto{font:700 1.35rem/1.3 sans-serif;margin-bottom:.3rem}
+  .solta .sub{color:var(--fraco);font-size:1rem}
+  .solta .btn{display:inline-block;margin:.9rem .3rem 0}
+  .recadoUp{margin-top:.9rem;font-size:.95rem;padding:.6rem .9rem;border-radius:.6rem;
+    background:var(--painel2);border:1px solid var(--borda);color:var(--fraco);
+    display:inline-block;max-width:46rem}
+  .recadoUp.erro{border-color:var(--rosa);color:#ffb0d4}
+  .recadoUp.ok{border-color:var(--teal);color:var(--teal)}
+  .barraUp{height:.4rem;background:var(--painel2);border-radius:.2rem;
+    overflow:hidden;margin-top:.8rem}
+  .barraUp i{display:block;height:100%;width:0;background:var(--laranja);transition:width .2s}
+
+  .itemFila{display:flex;align-items:center;gap:.9rem;padding:.7rem 0;
+    border-bottom:1px solid var(--borda);font-size:1.02rem}
+  .itemFila:last-child{border-bottom:none}
+  .itemFila .nome{flex:0 0 14rem;font-weight:700;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .itemFila .tipo{font:800 .74rem/1 sans-serif;letter-spacing:.1em;padding:.35rem .6rem;
+    border-radius:.4rem;background:var(--painel2);color:var(--fraco);flex:0 0 auto}
+  .itemFila .msg{color:var(--fraco);flex:1;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .itemFila .mini{flex:0 0 9rem;height:.3rem;background:var(--painel2);
+    border-radius:.15rem;overflow:hidden}
+  .itemFila .mini i{display:block;height:100%;background:var(--laranja);width:0}
+
+  .linhaProj{display:flex;align-items:center;gap:.9rem;padding:.9rem 1.3rem;
+    border-bottom:1px solid var(--borda);font-size:1.05rem}
+  .linhaProj:last-child{border-bottom:none}
+  .linhaProj:hover{background:var(--painel2)}
+  .linhaProj .nome{flex:1;font-weight:700;cursor:pointer;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .linhaProj .dur{color:var(--fraco);flex:0 0 4.4rem;text-align:right;
+    font:600 .95rem/1 ui-monospace,Menlo,monospace}
+  .selo{font:800 .74rem/1 sans-serif;letter-spacing:.06em;padding:.42rem .7rem;
+    border-radius:.5rem;border:1px solid var(--borda);color:var(--fraco);flex:0 0 auto}
+  .selo.ok{border-color:var(--teal);color:var(--teal)}
+  .selo.espera{border-color:var(--laranja);color:var(--laranja)}
+  .linkico{background:none;border:none;color:var(--laranja);font:inherit;
+    text-decoration:underline;padding:0;cursor:pointer}
+  .acoesProj{display:flex;gap:.4rem;flex:0 0 auto}
+  .acoesProj button{border:1px solid var(--borda);background:var(--painel2);
+    padding:.5rem .9rem;border-radius:.5rem;font-size:.95rem}
+  .acoesProj button:disabled{opacity:.4;cursor:not-allowed}
+
+  /* ============================ rodape ============================ */
+  .rodape{position:fixed;left:0;right:0;bottom:0;background:#05080f;
+    border-top:1px solid var(--borda);padding:.45rem 1.2rem;
+    font:.92rem/1 ui-monospace,Menlo,monospace;color:var(--fraco);
+    display:flex;gap:1rem;align-items:center;z-index:20}
+  .rodape .etapa{color:var(--laranja);min-width:7rem}
+  .barra{flex:1;height:.32rem;background:var(--painel2);border-radius:.16rem;overflow:hidden}
+  .barra i{display:block;height:100%;width:0;background:var(--laranja);transition:width .25s}
+
+
+  /* cabecotes de trilha: um botao por trilha, na cor dela, igual a referencia */
+  .faixas{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.7rem;align-items:start}
+  .cabecas{display:flex;flex-direction:column;gap:.5rem}
+  .vaoRegua{height:1.7rem;margin-bottom:.4rem}
+  .ct{border-radius:.75rem;background:var(--interno);display:grid;place-items:center;
+    border:.1rem solid;width:3.2rem;padding:0}
+  .ct svg{width:1.35rem;height:1.35rem}
+  .ct.marca{height:2.2rem;color:var(--rosa);border-color:rgba(255,45,138,.5);
+    box-shadow:0 0 .8rem rgba(255,45,138,.2)}
+  .ct.video{height:4.9rem;color:#9fb4dd;border-color:#2c3a58}
+  .ct.audio{height:4.2rem;color:var(--lima);border-color:rgba(182,232,42,.45);
+    box-shadow:0 0 .8rem rgba(182,232,42,.16)}
+  .ct.desligado{opacity:.4;filter:grayscale(.7)}
+  .ct:hover{filter:brightness(1.25)}
+
+  .btProjetos{background:var(--painel2);border:1px solid var(--borda);color:var(--texto);
+    border-radius:var(--r-p);padding:.8rem 1.2rem;font:700 1.02rem/1 inherit;margin-left:.6rem}
+  .btProjetos.on{border-color:var(--laranja);color:var(--laranja)}
+  .seletor{margin-left:auto;display:flex;align-items:center}
+
+
+  /* ============================ chat lateral ============================ */
+  .janela{display:grid;grid-template-columns:21rem minmax(0,1fr);gap:.8rem;
+    flex:1;min-height:0}
+  .editor{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+
+  .chat{height:100%;min-height:0;
+    display:flex;flex-direction:column;background:var(--painel);
+    border:1px solid var(--borda);border-radius:var(--r);overflow:hidden}
+  .chatTopo{display:flex;align-items:center;gap:.6rem;padding:.9rem 1.1rem;
+    border-bottom:1px solid var(--borda);font:700 1.02rem/1 sans-serif;flex:0 0 auto}
+  .pontoVivo{width:.5rem;height:.5rem;border-radius:50%;background:var(--lima);
+    box-shadow:0 0 .5rem var(--lima);flex:0 0 auto}
+  .chatFase{margin-left:auto;color:var(--fraco);font:600 .82rem/1 sans-serif;
+    letter-spacing:.06em;text-transform:uppercase}
+
+  .conversa{flex:1;overflow-y:auto;padding:1rem 1.1rem;display:flex;
+    flex-direction:column;gap:.9rem;font-size:1rem;line-height:1.5}
+  .conversa::-webkit-scrollbar{width:.5rem}
+  .conversa::-webkit-scrollbar-thumb{background:#26355a;border-radius:.25rem}
+  .msg{white-space:pre-wrap;word-break:break-word}
+  .msg.voce{align-self:flex-end;max-width:88%;background:var(--painel2);
+    border:1px solid var(--borda);border-radius:.8rem .8rem .2rem .8rem;
+    padding:.6rem .85rem;color:var(--texto)}
+  .msg.edvid{color:#cbd6ea}
+  .msg.edvid b{color:var(--texto)}
+  .msg .arq{color:var(--teal)}
+
+  .msgAcao{display:flex;align-items:center;gap:.5rem;font-size:.95rem;color:var(--fraco);
+    cursor:pointer;user-select:none}
+  .msgAcao .mais{color:#5fd68a}
+  .msgAcao .menos{color:#f26d7d}
+  .msgAcao .seta{transition:transform .15s}
+  .msgAcao.aberta .seta{transform:rotate(90deg)}
+  .detalheAcao{display:none;margin:.35rem 0 0 1.1rem;padding-left:.8rem;
+    border-left:2px solid var(--borda);color:var(--fraco);font-size:.95rem}
+  .msgAcao.aberta + .detalheAcao{display:block}
+
+  .tabelaCorte{width:100%;border-collapse:collapse;font-size:.92rem;
+    border:1px solid var(--borda);border-radius:.5rem;overflow:hidden}
+  .tabelaCorte th{background:var(--painel2);color:var(--fraco);text-align:left;
+    font:800 .8rem/1 sans-serif;letter-spacing:.08em;padding:.5rem .6rem}
+  .tabelaCorte td{border-top:1px solid var(--borda);padding:.5rem .6rem;
+    vertical-align:top;color:#cbd6ea}
+  .tabelaCorte td.n{color:var(--fraco);width:2.2rem;white-space:nowrap;text-align:right}
+  .tabelaCorte td.beat{font:800 .78rem/1.4 sans-serif;letter-spacing:.06em;
+    white-space:nowrap;color:var(--texto)}
+
+  .chatEntrada{display:flex;gap:.5rem;padding:.7rem .8rem;flex:0 0 auto;
+    border-top:1px solid var(--borda)}
+  .chatEntrada input{flex:1;background:var(--interno);border:1px solid var(--borda);
+    border-radius:.7rem;color:var(--texto);padding:.8rem .9rem;font:1rem/1.3 inherit}
+  .chatEntrada input::placeholder{color:#5b6b87}
+  .chatEntrada button{background:var(--painel2);border:1px solid var(--borda);
+    border-radius:.7rem;width:2.8rem;color:var(--fraco);font-size:1.1rem}
+  .chatEntrada button:hover{color:var(--texto);border-color:var(--laranja)}
+
+  .chatRodape{display:flex;gap:.6rem;padding:.5rem 1.1rem .7rem;flex:0 0 auto;
+    font:.82rem/1.3 ui-monospace,Menlo,monospace;color:#5b6b87}
+  .chatRodape span:last-child{margin-left:auto;color:var(--laranja)}
+
+  @media (max-width:1100px){
+    .janela{grid-template-columns:minmax(0,1fr)}
+    .chat{position:static;height:26rem}
+  }
+
+  .aba{display:none}
+  .aba.on{display:block;flex:1;min-height:0;overflow-y:auto;padding-right:.3rem}
+  .aba.on::-webkit-scrollbar{width:.5rem}
+  .aba.on::-webkit-scrollbar-thumb{background:#26355a;border-radius:.25rem}
+  /* A aba do corte nao rola: ela se ajusta para caber. */
+  #aba-corte.on,#aba-visual.on{display:flex;flex-direction:column;overflow:hidden}
+  #corteConteudo,#visualConteudo{flex:1;min-height:0;display:flex;flex-direction:column}
+</style>
+</head>
+<body>
+
+<div class="janela">
+
+<!-- ============================ chat lateral ============================ -->
+<aside class="chat">
+  <div class="chatTopo">
+    <span class="pontoVivo"></span>
+    <span id="chatProjeto">Edvid</span>
+    <span class="chatFase" id="chatFase"></span>
+  </div>
+  <div class="conversa" id="conversa"></div>
+  <form class="chatEntrada" id="chatForm">
+    <input id="chatTexto" autocomplete="off"
+           placeholder="Diz o que fazer: aprovar, cor #FF5200, refazer o corte…">
+    <button type="submit" title="Enviar">&#8629;</button>
+  </form>
+  <div class="chatRodape">
+    <span id="chatDica">whisper large-v3-turbo · local</span>
+    <span id="chatFila"></span>
+  </div>
+</aside>
+
+<main class="editor">
+
+<!-- ============================ topo ============================ -->
+<div class="painel topo">
+  <div class="marca">
+    <svg viewBox="0 0 176 58" fill="none" aria-label="Edvid">
+      <rect width="176" height="58" rx="15" fill="#0a1120"/>
+      <rect x="16" y="17" width="28" height="6.4" rx="3.2" fill="#b6e82a"/>
+      <rect x="16" y="26" width="21" height="6.4" rx="3.2" fill="#7fd132"/>
+      <rect x="16" y="35" width="28" height="6.4" rx="3.2" fill="#eef2fa"/>
+      <text x="49" y="41" font-family="Helvetica,Arial,sans-serif" font-size="31"
+            font-weight="800" font-style="italic" fill="#eef2fa" letter-spacing="-1">DVID</text>
+      <circle cx="130" cy="16" r="3.4" fill="#2be0c8"/>
+    </svg>
+  </div>
+  <div style="min-width:0">
+    <div class="tituloProjeto" id="hTitulo">Nenhum projeto</div>
+    <div class="subProjeto" id="hSub">Jogue um vídeo na pasta de entrada e rode o corte.</div>
+  </div>
+  <div class="seletor">
+    <select id="selProjeto"></select>
+    <button class="btProjetos" data-aba="projetos">Projetos<span class="contador" id="contFila"></span></button>
+  </div>
+</div>
+
+<!-- ============================ abas ============================ -->
+<div class="abas">
+  <button class="on" data-aba="corte"><span class="fase">FASE 1</span><span class="nome">Corte</span></button>
+  <button data-aba="estilo"><span class="nome">Estilo</span></button>
+  <button data-aba="visual"><span class="fase">FASE 2</span><span class="nome">Visual</span></button>
+</div>
+
+<!-- ============================ FASE 1 ============================ -->
+<section class="aba on" id="aba-corte">
+  <div id="corteVazio" class="painel vazio">Sem projeto carregado.</div>
+
+  <div id="corteConteudo" style="display:none">
+    <div class="palco">
+      <div style="min-width:0">
+
+        <div class="painel transporte">
+          <button class="bt" id="btnPlay" title="Play/Pause">
+            <svg width="15" height="15" viewBox="0 0 16 16"><path d="M3 2l11 6-11 6z" fill="currentColor"/></svg>
+          </button>
+          <button class="bt" id="btnMudo" title="Mudo">
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 2L4.5 5H2v6h2.5L8 14z" fill="currentColor"/>
+              <path d="M10.5 5.5a3.5 3.5 0 010 5" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
+          </button>
+          <div class="tempo"><span id="tAtual">0:00.00</span><b>/</b><span class="total" id="tTotal">0:00.00</span></div>
+          <button class="marcaIn" id="btnIn">
+            <svg width="12" height="13" viewBox="0 0 12 13"><path d="M1 1v11M1 1h9l-2 2.5L10 6H1" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/></svg>
+            IN
+          </button>
+          <div class="zoomBox">
+            zoom
+            <input type="range" id="zoom" min="4" max="260" value="52">
+            <button class="bt" id="btnAjustar" title="Ajustar a timeline à janela">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M1.5 5.5v-3a1 1 0 011-1h3M10.5 1.5h3a1 1 0 011 1v3M14.5 10.5v3a1 1 0 01-1 1h-3M5.5 14.5h-3a1 1 0 01-1-1v-3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="painel caixaTrilhas">
+          <div class="faixas">
+            <div class="cabecas">
+              <div class="vaoRegua"></div>
+              <button class="ct marca" id="ctMarca" title="Marcar IN no ponto atual">
+                <svg viewBox="0 0 12 13"><path d="M1 1v11M1 1h9l-2 2.5L10 6H1" stroke="currentColor"
+                  stroke-width="1.6" fill="none" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="ct video" id="ctVideo" title="Ligar/desligar as miniaturas">
+                <svg viewBox="0 0 16 16"><rect x="1.2" y="3.2" width="13.6" height="9.6" rx="2.4"
+                  stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6.6 6.2l3.6 1.8-3.6 1.8z"
+                  fill="currentColor"/></svg>
+              </button>
+              <button class="ct audio" id="ctAudio" title="Mudo">
+                <svg viewBox="0 0 16 16"><path d="M8 2.5L4.6 5.4H2.2v5.2h2.4L8 13.5z" fill="currentColor"/>
+                  <path d="M10.6 5.6a3.4 3.4 0 010 4.8" stroke="currentColor" stroke-width="1.5"
+                  fill="none" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+            <div class="trilhas" id="trilhas">
+            <div class="pista" id="pista">
+              <div class="cabecote" id="cabecote"></div>
+              <div class="regua" id="regua"></div>
+              <div class="trilhaMarca" id="trilhaMarca"></div>
+              <div class="trilhaClipes" id="trilhaClipes"></div>
+              <div class="trilhaOnda" id="trilhaOnda"></div>
+            </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="painel fichaClipe" id="fichaClipe" style="display:none">
+          <div class="quem">CLIPE SELECIONADO</div>
+          <div class="fala" id="clipeTexto"></div>
+          <div class="escolhaBloco" id="clipeBlocos"></div>
+        </div>
+
+        <div class="acoes">
+          <button class="btn primario" id="btnAprovar">Aprovar corte e escolher o estilo</button>
+          <button class="btn" id="btnRefazer">Refazer o corte</button>
+          <button class="btn" id="btnReprovar">Pedir ajuste</button>
+          <span id="avisoEditado" class="sub" style="display:none"></span>
+        </div>
+
+        <div class="painel removidos" id="removidos" style="display:none"></div>
+      </div>
+
+      <div class="painel previa">
+        <video id="player" playsinline></video>
+        <div class="legendaPrev" id="legendaPrev">corte da Fase 1</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ESTILO ============================ -->
+<section class="aba" id="aba-estilo">
+  <div class="tituloEstilo">Como vamos montar a Fase 2?</div>
+
+  <div class="grupo">
+    <div class="rotulo">TIPO DE EDIÇÃO</div>
+    <div class="cards" id="tipoEdicao"></div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">COR DE DESTAQUE <em id="dicaCor">os estilos escolhidos não usam destaque</em></div>
+    <div class="corLinha">
+      <label class="botaoCor"><i id="bolaCor"></i><input type="color" id="corPicker" value="#FF5200"></label>
+      <input class="hex" id="corHex" value="#FF5200">
+    </div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">ESTILO DE HEADLINE</div>
+    <div class="presets" id="headlines"></div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">ESTILO DE LEGENDA</div>
+    <div class="presets" id="legendas"></div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">ELEMENTOS DA EDIÇÃO</div>
+    <div class="toggles" id="elementos"></div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">MATERIAL DA FASE 2
+      <em>b-roll alimenta a tela dividida · a trilha entra por baixo da fala</em></div>
+    <div class="linhaArquivo">
+      <label class="btn">Enviar imagens<input type="file" id="fBroll" accept="image/*" multiple hidden></label>
+      <span id="brollStatus" class="sub"></span>
+      <label class="btn">Enviar trilha<input type="file" id="fTrilha" accept="audio/*" hidden></label>
+      <button class="btn" id="btnTirarTrilha">Remover trilha</button>
+      <span id="trilhaStatus" class="sub"></span>
+    </div>
+    <div class="tirinha" id="brollTira"></div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">HEADLINE <em>aparece durante o HOOK · Enter quebra a linha</em></div>
+    <textarea class="obs" id="headline" rows="2" style="max-width:1000px;min-height:4.6rem"></textarea>
+    <div class="resumo"><span class="bolinha">?</span><span id="headlineDica"></span></div>
+  </div>
+
+  <div class="grupo">
+    <input class="obs" id="obs" style="max-width:1000px" placeholder="Observações para a Fase 2 (opcional)">
+    <div class="resumo"><span class="bolinha">?</span><span id="resumoEstilo"></span></div>
+  </div>
+
+  <button class="btn primario" id="btnFase2">Confirmar e iniciar a Fase 2</button>
+</section>
+
+<!-- ============================ FASE 2 ============================ -->
+<section class="aba" id="aba-visual">
+  <div id="visualVazio" class="painel vazio">
+    A Fase 2 ainda não foi renderizada.<br>
+    Escolha o estilo na aba <b>Estilo</b> e clique em “Confirmar e iniciar a Fase 2”.
+  </div>
+
+  <div id="visualConteudo" style="display:none">
+    <div class="palco">
+      <div style="min-width:0;display:flex;flex-direction:column;min-height:0">
+
+        <div class="painel transporte">
+          <button class="bt" id="btnPlay2" title="Play/Pause">
+            <svg viewBox="0 0 16 16"><path d="M3 2l11 6-11 6z" fill="currentColor"/></svg>
+          </button>
+          <button class="bt" id="btnMudo2" title="Mudo">
+            <svg viewBox="0 0 16 16"><path d="M8 2L4.5 5H2v6h2.5L8 14z" fill="currentColor"/>
+              <path d="M10.5 5.5a3.5 3.5 0 010 5" stroke="currentColor" stroke-width="1.4"
+                fill="none" stroke-linecap="round"/></svg>
+          </button>
+          <div class="tempo"><span id="tAtual2">0:00.00</span><b>/</b><span class="total" id="tTotal2">0:00.00</span></div>
+          <button class="marcaIn" id="btnIn2">
+            <svg viewBox="0 0 12 13"><path d="M1 1v11M1 1h9l-2 2.5L10 6H1" stroke="currentColor"
+              stroke-width="1.6" fill="none" stroke-linejoin="round"/></svg>
+            IN
+          </button>
+          <div class="zoomBox">
+            zoom
+            <input type="range" id="zoom2" min="4" max="260" value="52">
+            <button class="bt" id="btnAjustar2" title="Ajustar à janela">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M1.5 5.5v-3a1 1 0 011-1h3M10.5 1.5h3a1 1 0 011 1v3M14.5 10.5v3a1 1 0 01-1 1h-3M5.5 14.5h-3a1 1 0 01-1-1v-3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="painel caixaTrilhas">
+          <div class="faixas">
+            <div class="cabecas">
+              <div class="vaoRegua"></div>
+              <button class="ct marca" id="ctMarca2" title="Marcar IN no ponto atual">
+                <svg viewBox="0 0 12 13"><path d="M1 1v11M1 1h9l-2 2.5L10 6H1" stroke="currentColor"
+                  stroke-width="1.6" fill="none" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="ct video" id="ctVideo2" title="Ligar/desligar as miniaturas">
+                <svg viewBox="0 0 16 16"><rect x="1.2" y="3.2" width="13.6" height="9.6" rx="2.4"
+                  stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6.6 6.2l3.6 1.8-3.6 1.8z"
+                  fill="currentColor"/></svg>
+              </button>
+              <button class="ct audio" id="ctAudio2" title="Mudo">
+                <svg viewBox="0 0 16 16"><path d="M8 2.5L4.6 5.4H2.2v5.2h2.4L8 13.5z" fill="currentColor"/>
+                  <path d="M10.6 5.6a3.4 3.4 0 010 4.8" stroke="currentColor" stroke-width="1.5"
+                  fill="none" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+            <div class="trilhas" id="trilhas2">
+              <div class="pista" id="pista2">
+                <div class="cabecote" id="cabecote2"></div>
+                <div class="regua" id="regua2"></div>
+                <div class="trilhaMarca" id="trilhaMarca2"></div>
+                <div class="trilhaClipes" id="trilhaClipes2"></div>
+                <div class="trilhaOnda" id="trilhaOnda2"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="painel removidos" id="avisos2" style="display:none"></div>
+      </div>
+
+      <div class="painel previa">
+        <video id="playerFinal" playsinline></video>
+        <div class="legendaPrev" id="legendaFinal">Fase 2 — vídeo final</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="aba" id="aba-projetos">
+  <div class="grupo">
+    <div class="rotulo">ENVIAR VÍDEOS <em>vários de uma vez; cada um vira um projeto e entra na fila</em></div>
+    <div class="solta" id="solta">
+      <div class="soltaTexto">Arraste vídeos aqui</div>
+      <div class="sub">.mov .mp4 .m4v .avi .mkv .webm .mpg .3gp</div>
+      <label class="btn primario" style="margin-top:14px">Escolher arquivos
+        <input type="file" id="fVideos" accept="video/*,.mov,.mp4,.m4v,.avi,.mkv,.webm,.mpg,.mpeg,.3gp" multiple hidden></label>
+      <button class="btn" id="btnVarrer" style="margin-top:14px">Varrer a pasta de entrada</button>
+      <div class="recadoUp" id="recadoUp" style="display:none"></div>
+    </div>
+    <div class="barraUp" id="barraUp" style="display:none"><i></i></div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">FILA</div>
+    <div class="painel" id="painelFila" style="padding:14px 16px"></div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">PROJETOS
+      <em><button class="linkico" id="btnLoteFase2">renderizar Fase 2 de todos os aprovados</button></em>
+    </div>
+    <div class="painel" id="tabelaProjetos" style="padding:6px 0;overflow:hidden"></div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<div class="rodape">
+  <span class="etapa" id="logEtapa">pronto</span>
+  <div class="barra"><i id="logBarra"></i></div>
+  <span id="logMsg"></span>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

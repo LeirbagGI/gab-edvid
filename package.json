@@ -1,0 +1,30 @@
+{
+  "name": "edvid",
+  "version": "0.1.0",
+  "description": "Edicao de video assistida por IA — corte organico + preview + render",
+  "scripts": {
+    "edvid": "node src/cli.js",
+    "preview": "node src/server/index.js",
+    "teste": "node --test src/fase1/corte.test.js src/server/fila.test.js src/server/cota.test.js src/interface/interface.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.123.0",
+    "@remotion/bundler": "^4.0.520",
+    "@remotion/cli": "^4.0.520",
+    "@remotion/renderer": "^4.0.520",
+    "chokidar": "^5.0.0",
+    "express": "^5.2.1",
+    "multer": "^2.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "remotion": "^4.0.520",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

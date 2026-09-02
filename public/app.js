@@ -1,0 +1,1056 @@
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+
+// Cores dos blocos: usadas nos botoes da ficha do clipe. Na timeline o rotulo
+// e branco, como na referencia.
+const CORES_BLOCO = { HOOK: '#f73d9e', DINAMICA: '#f97a1e', RECURSOS: '#38d6d2', CTA: '#8b6bff' };
+const BLOCOS = Object.keys(CORES_BLOCO);
+
+import {
+  HEADLINES, LEGENDAS, TIPOS_EDICAO, ELEMENTOS, FRASE_AMOSTRA, cssDe,
+} from '/shared/presets.js';
+
+/* ---------------------------------------------------------------- presets */
+// Os mockups de celular de cada tipo de edicao. So isso e local: e ilustracao
+// da aba Estilo, nao entra no render.
+const FONE = {
+  limpa: `<div class="barras"><s style="width:26px"></s><s style="width:17px"></s></div>
+          <div class="cabeca"></div>
+          <div class="legendaMini"><s></s><s></s><s></s></div>
+          <div class="cabeca" style="width:44px;height:44px"></div>`,
+  'tela-dividida': `<div class="imagem">&#9650;</div>
+          <div class="legendaMini"><s></s><s></s><s></s></div>
+          <div class="cabeca"></div>
+          <div class="cabeca" style="width:44px;height:44px"></div>`,
+  'tela-dividida-2': `<div class="cabeca"></div>
+          <div class="legendaMini"><s></s><s></s><s></s></div>
+          <div class="divisor"></div>
+          <div class="imagem">&#9650;</div>`,
+};
+
+/* ---------------------------------------------------------------- estado */
+let P = null;
+let ultimoAberto = null;
+
+const fmt = (s) => {
+  const m = Math.floor(s / 60);
+  return `${m}:${(s % 60).toFixed(2).padStart(5, '0')}`;
+};
+const fmtCurto = (s) => {
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}.00`;
+};
+
+/* ---------------------------------------------------------------- abas */
+$$('.abas button, .btProjetos').forEach((b) => {
+  b.onclick = () => {
+    $$('.abas button, .btProjetos').forEach((x) => x.classList.toggle('on', x === b));
+    $$('.aba').forEach((s) => s.classList.toggle('on', s.id === `aba-${b.dataset.aba}`));
+    if (b.dataset.aba === 'estilo') desenharAmostras((performance.now() / 1000) % CICLO);
+  };
+});
+
+/* ---------------------------------------------------------------- carregar */
+async function listarProjetos() {
+  const lista = await (await fetch('/api/projetos')).json();
+  const sel = $('#selProjeto');
+  const antes = sel.value;
+  sel.innerHTML = lista.map((p) => `<option value="${p.nome}">${p.nome}</option>`).join('')
+    || '<option>— nenhum —</option>';
+  // Mantém o projeto aberto se ele ainda existe; senão abre o mais recente.
+  if (lista.some((p) => p.nome === antes)) sel.value = antes;
+  if (lista.length) await abrir(sel.value || lista[0].nome);
+  return lista;
+}
+$('#selProjeto').onchange = (e) => abrir(e.target.value);
+
+async function abrir(nome) {
+  const r = await fetch(`/api/projeto/${encodeURIComponent(nome)}`);
+  if (r.ok) aplicar(await r.json());
+}
+
+function aplicar(projeto) {
+  P = projeto;
+  const f1 = P.fase1 || {};
+  // Nome do arquivo sem extensão; se for enorme (download com hash), corta.
+  let arq = P.origem.arquivo.replace(/\.[^.]+$/, '');
+  if (arq.length > 26) arq = `${arq.slice(0, 24)}…`;
+  $('#hTitulo').textContent = `${P.nome} — ${arq}`;
+
+  const status = {
+    'aguardando-aprovacao': `Fase 1 — corte orgânico pronto (${(f1.duracao || 0).toFixed(1).replace('.', ',')}s). Aprova?`,
+    aprovada: 'Corte aprovado — escolha o estilo da Fase 2 na aba Estilo',
+    ajustar: 'Corte marcado para ajuste — mexa na timeline e refaça',
+    editado: 'Timeline editada à mão — rode --refazer e aprove',
+  }[f1.status] || '';
+
+  // Com a Fase 2 pronta o cabeçalho resume o que foi aplicado, como na referência.
+  const f2 = P.fase2 || {};
+  if (f2.status === 'pronta') {
+    const nome = (lista, id) => lista.find((x) => x.id === id)?.nome || id;
+    $('#hSub').textContent = `Fase 2 entregue — ${nome(TIPOS_EDICAO, P.estilo.tipoEdicao)}`
+      + ` · ${nome(HEADLINES, P.estilo.estiloHeadline)} · ${nome(LEGENDAS, P.estilo.estiloLegenda)}`;
+  } else {
+    $('#hSub').textContent = status;
+  }
+
+  if (!f1.clipes?.length) {
+    $('#corteVazio').style.display = '';
+    $('#corteConteudo').style.display = 'none';
+    return;
+  }
+  $('#corteVazio').style.display = 'none';
+  $('#corteConteudo').style.display = '';
+
+  // Todo projeto chama o arquivo de fase1-corte.mp4, então comparar o NOME
+  // nunca detecta troca de projeto. Compara a URL inteira.
+  const v = $('#player');
+  const src = `/midia/${encodeURIComponent(P.nome)}/${f1.arquivo}`;
+  if (v.dataset.src !== src) {
+    v.dataset.src = src;
+    v.src = src;
+    v.addEventListener('loadedmetadata', () => { v.currentTime = 0.05; }, { once: true });
+  }
+  $('#tTotal').textContent = fmt(f1.duracao || 0);
+
+  const editado = f1.status === 'editado';
+  $('#avisoEditado').style.display = editado ? '' : 'none';
+  $('#avisoEditado').textContent = editado
+    ? 'timeline mexida — clique em Refazer o corte para valer no arquivo' : '';
+
+  desenharTimeline();
+  desenharRemovidos();
+  aplicarEstilo();
+  aplicarFase2();
+  desenharConversa();
+}
+
+/* --------------------------------------------------------------- timeline */
+/*
+ * Uma fabrica, duas instancias: a Fase 1 desenha o corte e a Fase 2 desenha o
+ * video final. Sem isso as duas timelines iam divergir com o tempo.
+ */
+function criarTimeline({ sufixo, video, dados, aoSelecionar }) {
+  const q = (id) => $(`#${id}${sufixo}`);
+  const player = $(`#${video}`);
+  let pxPorSeg = 52;
+  let miniaturas = true;
+
+  const el = {
+    trilhas: q('trilhas'), pista: q('pista'), regua: q('regua'),
+    marca: q('trilhaMarca'), clipes: q('trilhaClipes'), onda: q('trilhaOnda'),
+    cabecote: q('cabecote'), zoom: q('zoom'), tAtual: q('tAtual'), tTotal: q('tTotal'),
+  };
+
+  function desenhar() {
+    const d = dados();
+    if (!d) return;
+    const largura = Math.max(320, d.duracao * pxPorSeg);
+    el.pista.style.width = `${largura}px`;
+    el.tTotal.textContent = fmt(d.duracao);
+
+    const passo = pxPorSeg > 110 ? 1 : pxPorSeg > 55 ? 2 : pxPorSeg > 26 ? 5 : 10;
+    let regua = '';
+    for (let t = 0; t <= d.duracao; t += passo) {
+      regua += `<i style="left:${t * pxPorSeg}px">${fmtCurto(t)}</i>`;
+      for (let k = 1; k < 4; k++) {
+        const x = (t + (passo * k) / 4) * pxPorSeg;
+        if (x < largura) regua += `<u style="left:${x}px"></u>`;
+      }
+    }
+    el.regua.innerHTML = regua;
+
+    el.clipes.innerHTML = d.clipes.map((c) => `
+      <div class="clipe${d.selecionado === c.id ? ' sel' : ''}" data-id="${c.id}"
+        style="left:${c.inicio * pxPorSeg}px;width:${Math.max(16, c.duracao * pxPorSeg - 2)}px;
+               ${miniaturas
+                 ? `background-image:url(/midia/${encodeURIComponent(P.nome)}/thumbs/${c.id}.jpg)`
+                 : `background:${CORES_BLOCO[c.bloco]}22`}">
+        <span class="tag">${c.bloco}</span>
+        <span class="dur">${c.duracao.toFixed(2)}s</span>
+      </div>`).join('');
+
+    if (aoSelecionar) {
+      el.clipes.querySelectorAll('.clipe').forEach((n) => {
+        n.onclick = () => {
+          const c = d.clipes.find((x) => x.id === n.dataset.id);
+          player.currentTime = c.inicio + 0.02;
+          aoSelecionar(c.id);
+        };
+        // Alças de aparar: arrastar a borda muda onde o clipe começa/termina
+        // no vídeo de origem. O servidor já aceitava isso; faltava a alça.
+        for (const lado of ['ini', 'fim']) {
+          const alca = document.createElement('span');
+          alca.className = `alca ${lado}`;
+          alca.addEventListener('pointerdown', (e) => aparar(e, n.dataset.id, lado));
+          n.appendChild(alca);
+        }
+      });
+    }
+
+    const picos = d.picos || [];
+    const barras = Math.max(1, Math.floor(largura / 3.5));
+    const salto = picos.length / barras;
+    let onda = '';
+    for (let i = 0; i < barras; i++) {
+      onda += `<i style="height:${Math.max(2, (picos[Math.floor(i * salto)] ?? 0) * 56)}px"></i>`;
+    }
+    el.onda.innerHTML = onda;
+
+    const em = Number(el.marca.dataset.em);
+    el.marca.innerHTML = Number.isFinite(em) && em > 0
+      ? `<span class="pinoMarca" style="left:${em * pxPorSeg}px"></span>` : '';
+
+    mover();
+  }
+
+  const mover = () => { el.cabecote.style.left = `${(player.currentTime || 0) * pxPorSeg}px`; };
+
+  function seguir() {
+    const x = (player.currentTime || 0) * pxPorSeg;
+    const c = el.trilhas;
+    const m = 60;
+    if (x < c.scrollLeft + m) c.scrollLeft = Math.max(0, x - m);
+    else if (x > c.scrollLeft + c.clientWidth - m) c.scrollLeft = x - c.clientWidth + m;
+  }
+
+  /* ---- agulha arrastavel ---- */
+  const tempoEm = (clientX) => {
+    const r = el.pista.getBoundingClientRect();
+    return Math.min(dados()?.duracao ?? 0, Math.max(0, (clientX - r.left) / pxPorSeg));
+  };
+  let tocava = false;
+  const arrasta = (e) => {
+    player.currentTime = tempoEm(e.clientX);
+    el.tAtual.textContent = fmt(player.currentTime);
+    mover();
+  };
+  const fim = () => {
+    window.removeEventListener('pointermove', arrasta);
+    el.cabecote.classList.remove('arrastando');
+    if (tocava) player.play();
+  };
+  const comeca = (e) => {
+    e.preventDefault();
+    tocava = !player.paused;
+    player.pause();
+    el.cabecote.classList.add('arrastando');
+    arrasta(e);
+    window.addEventListener('pointermove', arrasta);
+    window.addEventListener('pointerup', fim, { once: true });
+  };
+  [el.cabecote, el.regua, el.marca, el.onda].forEach((n) => n.addEventListener('pointerdown', comeca));
+
+  /* ---- transporte ---- */
+  player.ontimeupdate = () => {
+    el.tAtual.textContent = fmt(player.currentTime);
+    mover();
+    if (!player.paused) seguir();
+  };
+  const iconePlay = (tocando) => (tocando
+    ? '<svg viewBox="0 0 16 16"><rect x="3" y="2" width="4" height="12" fill="currentColor"/><rect x="9" y="2" width="4" height="12" fill="currentColor"/></svg>'
+    : '<svg viewBox="0 0 16 16"><path d="M3 2l11 6-11 6z" fill="currentColor"/></svg>');
+  player.onplay = () => { q('btnPlay').innerHTML = iconePlay(true); };
+  player.onpause = () => { q('btnPlay').innerHTML = iconePlay(false); };
+  q('btnPlay').onclick = () => (player.paused ? player.play() : player.pause());
+  q('btnMudo').onclick = (e) => {
+    player.muted = !player.muted;
+    e.currentTarget.style.color = player.muted ? 'var(--fraco)' : 'var(--texto)';
+  };
+  q('btnIn').onclick = (e) => e.currentTarget.classList.toggle('on');
+  el.zoom.oninput = (e) => { pxPorSeg = Number(e.target.value); desenhar(); };
+  q('btnAjustar').onclick = () => {
+    pxPorSeg = Math.max(4, Math.min(260, (el.trilhas.clientWidth - 8) / (dados()?.duracao || 1)));
+    el.zoom.value = String(Math.round(pxPorSeg));
+    desenhar();
+  };
+
+  /* ---- cabecotes de trilha ---- */
+  q('ctMarca').onclick = () => {
+    q('btnIn').classList.add('on');
+    el.marca.dataset.em = String(player.currentTime.toFixed(3));
+    desenhar();
+  };
+  q('ctVideo').onclick = (e) => {
+    miniaturas = !miniaturas;
+    e.currentTarget.classList.toggle('desligado', !miniaturas);
+    desenhar();
+  };
+  q('ctAudio').onclick = (e) => {
+    player.muted = !player.muted;
+    e.currentTarget.classList.toggle('desligado', player.muted);
+    q('btnMudo').style.color = player.muted ? 'var(--fraco)' : 'var(--texto)';
+  };
+
+  /**
+   * Arrasta a borda de um clipe. Mexe em origemInicio/origemFim (tempo no vídeo
+   * bruto) e reposiciona todo mundo depois dele, para o preview ser honesto.
+   */
+  function aparar(ev, id, lado) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const clipes = P.fase1.clipes;
+    const i = clipes.findIndex((c) => c.id === id);
+    const c = clipes[i];
+    const original = { ini: c.origemInicio, fim: c.origemFim };
+    const x0 = ev.clientX;
+    const MIN = 0.15;
+
+    // Só limita pelo vizinho quando os dois são contíguos na origem.
+    const ant = clipes[i - 1];
+    const prox = clipes[i + 1];
+    const pisoIni = (ant && ant.origemFim <= original.ini) ? ant.origemFim : 0;
+    const tetoFim = (prox && prox.origemInicio >= original.fim)
+      ? prox.origemInicio : (P.origem?.duracao ?? original.fim);
+
+    const mover = (e) => {
+      const delta = (e.clientX - x0) / pxPorSeg;
+      if (lado === 'ini') {
+        c.origemInicio = Math.min(original.fim - MIN,
+          Math.max(pisoIni, original.ini + delta));
+      } else {
+        c.origemFim = Math.max(original.ini + MIN,
+          Math.min(tetoFim, original.fim + delta));
+      }
+      c.duracao = Number((c.origemFim - c.origemInicio).toFixed(3));
+      recolocar();
+      desenhar();
+    };
+    const soltar = async () => {
+      window.removeEventListener('pointermove', mover);
+      await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/clipe/${id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ origemInicio: c.origemInicio, origemFim: c.origemFim }),
+      });
+      abrir(P.nome);
+    };
+    window.addEventListener('pointermove', mover);
+    window.addEventListener('pointerup', soltar, { once: true });
+  }
+
+  /** Reempilha os clipes ativos na linha do tempo depois de um aparo. */
+  function recolocar() {
+    let t = 0;
+    for (const c of P.fase1.clipes) {
+      if (c.ativo === false) continue;
+      c.inicio = Number(t.toFixed(3));
+      t += c.duracao;
+      c.fim = Number(t.toFixed(3));
+    }
+    P.fase1.duracao = Number(t.toFixed(2));
+  }
+
+  return { desenhar, player, get px() { return pxPorSeg; } };
+}
+
+let clipeSel = null;
+
+const tlCorte = criarTimeline({
+  sufixo: '', video: 'player',
+  dados: () => (P?.fase1?.clipes?.length ? {
+    duracao: P.fase1.duracao,
+    clipes: P.fase1.clipes.filter((c) => c.ativo !== false),
+    picos: P.fase1.picos,
+    selecionado: clipeSel,
+  } : null),
+  aoSelecionar: (id) => { clipeSel = id; tlCorte.desenhar(); desenharFicha(); },
+});
+
+const tlVisual = criarTimeline({
+  sufixo: '2', video: 'playerFinal',
+  dados: () => (P?.fase2?.status === 'pronta' ? {
+    duracao: P.fase2.duracao || P.fase1.duracao,
+    clipes: P.fase1.clipes.filter((c) => c.ativo !== false),
+    picos: P.fase2.picos || P.fase1.picos,
+  } : null),
+});
+
+const player = tlCorte.player;
+
+// Um vídeo que não carrega não pode falhar calado — é o que aconteceu aqui.
+for (const [v, onde] of [[tlCorte.player, '#legendaPrev'], [tlVisual.player, '#legendaFinal']]) {
+  v.onerror = () => {
+    const el = $(onde);
+    if (el) {
+      el.textContent = 'não consegui carregar o vídeo — o arquivo sumiu da pasta do projeto?';
+      el.style.color = 'var(--rosa)';
+    }
+  };
+  v.addEventListener('loadeddata', () => {
+    const el = $(onde);
+    if (el) el.style.color = '';
+  });
+  // Clicar no próprio vídeo dá play/pause, como em qualquer player.
+  v.addEventListener('click', () => (v.paused ? v.play() : v.pause()));
+  v.style.cursor = 'pointer';
+}
+
+function desenharTimeline() { tlCorte.desenhar(); }
+
+function desenharFicha() {
+  const c = P.fase1.clipes.find((x) => x.id === clipeSel);
+  const ficha = $('#fichaClipe');
+  if (!c) { ficha.style.display = 'none'; return; }
+  ficha.style.display = '';
+  $('#clipeTexto').textContent = `“${c.texto}”`;
+  $('#clipeBlocos').innerHTML = BLOCOS.map((b) => {
+    const on = b === c.bloco;
+    return `<button data-b="${b}" style="${on
+      ? `background:${CORES_BLOCO[b]};border-color:${CORES_BLOCO[b]};color:#08101c`
+      : `color:${CORES_BLOCO[b]}`}">${b}</button>`;
+  }).join('') + `<button data-desligar style="margin-left:8px;color:var(--fraco)">
+      ${c.ativo === false ? 'Religar clipe' : 'Desligar clipe'}</button>`;
+
+  $('#clipeBlocos').querySelectorAll('button').forEach((el) => {
+    el.onclick = () => (el.hasAttribute('data-desligar')
+      ? patchClipe(c.id, { ativo: c.ativo === false })
+      : patchClipe(c.id, { bloco: el.dataset.b }));
+  });
+}
+
+async function patchClipe(id, corpo) {
+  await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/clipe/${id}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo),
+  });
+  abrir(P.nome);
+}
+
+function desenharRemovidos() {
+  const d = P.fase1.descartados || [];
+  const el = $('#removidos');
+  if (!d.length) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.innerHTML = `<b>${d.length} trecho(s) removido(s) no corte orgânico</b><ul>${
+    d.slice(0, 10).map((x) => `<li>${fmt(x.inicio)} — “${x.texto}” <code>${x.motivos.join(', ')}</code></li>`).join('')
+  }</ul>`;
+}
+
+// Teclado: setas andam quadro a quadro na timeline da aba aberta.
+window.addEventListener('keydown', (e) => {
+  const campo = document.activeElement?.tagName;
+  if (!P || campo === 'INPUT' || campo === 'TEXTAREA') return;
+  const tl = $('#aba-visual').classList.contains('on') ? tlVisual : tlCorte;
+  const passo = e.shiftKey ? 1 : 1 / (P.saida?.fps || 30);
+  if (e.key === 'ArrowRight') { tl.player.currentTime += passo; e.preventDefault(); }
+  if (e.key === 'ArrowLeft') { tl.player.currentTime -= passo; e.preventDefault(); }
+  if (e.key === ' ') { tl.player.paused ? tl.player.play() : tl.player.pause(); e.preventDefault(); }
+});
+
+$('#btnAprovar').onclick = async () => {
+  await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/fase1/aprovar`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  await abrir(P.nome);
+  $$('.abas button')[1].click();
+};
+$('#btnRefazer').onclick = async () => {
+  await enfileirar('refazer', { nome: P.nome });
+  $('#logEtapa').textContent = 'refazer';
+  $('#logMsg').textContent = 'Refazendo o corte com a timeline como está.';
+};
+$('#btnReprovar').onclick = async () => {
+  const observacao = prompt('O que precisa ajustar no corte?') || '';
+  await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/fase1/reprovar`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ observacao }) });
+  abrir(P.nome);
+};
+
+/* ---------------------------------------------------------------- estilo */
+function montarEstilo() {
+  $('#tipoEdicao').innerHTML = TIPOS_EDICAO.map((t) => `
+    <div class="card" data-id="${t.id}">
+      <span class="marcaSel">\u2713</span>
+      <div class="fone">${FONE[t.id]}</div>
+      <div class="nome">${t.nome}</div>
+    </div>`).join('');
+
+  const preset = (p, tipo) => `
+    <div class="preset" data-id="${p.id}">
+      <span class="marcaSel">\u2713</span>
+      <div class="amostra" data-amostra="${tipo}:${p.id}"
+           ${p.fundoAmostra ? `style="background:${p.fundoAmostra}"` : ''}></div>
+    </div>`;
+  $('#headlines').innerHTML = HEADLINES.map((h) => preset(h, 'h')).join('');
+  $('#legendas').innerHTML = LEGENDAS.map((l) => preset(l, 'l')).join('');
+
+  $('#elementos').innerHTML = ELEMENTOS.map((e) => `
+    <div class="toggle" data-id="${e.id}">
+      <span class="caixa">\u2713</span><span class="ic">${e.ic}</span>${e.nome}
+    </div>`).join('');
+
+  $('#tipoEdicao').onclick = (e) => escolher(e, '.card', 'tipoEdicao');
+  $('#headlines').onclick = (e) => escolher(e, '.preset', 'estiloHeadline');
+  $('#legendas').onclick = (e) => escolher(e, '.preset', 'estiloLegenda');
+  $('#elementos').onclick = (e) => {
+    const el = e.target.closest('.toggle');
+    if (!el) return;
+    const k = el.dataset.id;
+    salvarEstilo({ elementos: { ...P.estilo.elementos, [k]: !P.estilo.elementos[k] } });
+  };
+
+  animar();
+}
+
+/* ------------------------------------------------------- amostras animadas */
+/*
+ * Cada card roda a mesma animacao que o preset faz no video: a legenda revela
+ * palavra por palavra na janela do preset, a headline entra e sai. Um unico
+ * requestAnimationFrame move todos, entao os cards ficam em sincronia.
+ */
+const PALAVRAS_AMOSTRA = FRASE_AMOSTRA.split(' ');
+const POR_PALAVRA = 0.42;                                   // segundos por palavra
+const CICLO = PALAVRAS_AMOSTRA.length * POR_PALAVRA + 0.7;  // + respiro no fim
+
+function amostraLegenda(p, t, cor) {
+  // `escala` do preset multiplica o corpo, igual ao render.
+  const est = cssDe(p.base(cor)) + (p.escala ? `;font-size:${p.escala}em` : '');
+  if (p.modo === 'nenhum') return `<span style="${est}">${p.amostra}</span>`;
+
+  const i = Math.min(PALAVRAS_AMOSTRA.length - 1, Math.floor(t / POR_PALAVRA));
+  const ativo = cssDe(p.ativo(cor));
+
+  if (p.modo === 'palavra') {
+    return `<span style="${est}">${PALAVRAS_AMOSTRA[i]}</span>`;
+  }
+  const janela = p.janela || 3;
+  const de = Math.floor(i / janela) * janela;
+  const pedaco = PALAVRAS_AMOSTRA.slice(de, de + janela);
+  const linhas = p.linhas || 1;
+  const porLinha = Math.ceil(pedaco.length / linhas);
+
+  // O separador vem ANTES da palavra: assim a quebra de linha nunca engole o
+  // espaco entre as duas palavras vizinhas.
+  const html = pedaco.map((w, k) => {
+    const antes = k === 0 ? ''
+      : (linhas > 1 && k % porLinha === 0) ? '<br>' : ' ';
+    const soando = de + k === i;
+    return `${antes}<span style="${soando ? ativo : ''}">${w}</span>`;
+  }).join('');
+  return `<span style="${est}">${html}</span>`;
+}
+
+function amostraHeadline(p, t, cor) {
+  // Entra em 0,35 s, segura o ciclo inteiro e sai nos ultimos 0,25 s — o mesmo
+  // arco do render, sem deixar o card muito tempo em branco.
+  const dentro = Math.min(1, t / 0.35);
+  const fora = Math.min(1, Math.max(0, (t - (CICLO - 0.25)) / 0.25));
+  const op = (dentro * (1 - fora)).toFixed(3);
+  const y = ((1 - dentro) * -14 + fora * 8).toFixed(1);
+  const est = cssDe(p.estilo(cor));
+  const linhas = p.amostra.split('\n').map((l, i) => `
+    <span style="display:block${p.corSegundaLinha && i === 1 ? `;color:${cor}` : ''}">${l}</span>`).join('');
+  return `<span style="display:inline-block;opacity:${op};transform:translateY(${y}px);${est}">${linhas}</span>`;
+}
+
+function desenharAmostras(t) {
+  const cor = P?.estilo?.corDestaque || '#EE7533';
+  $$('[data-amostra]').forEach((el) => {
+    const [tipo, id] = el.dataset.amostra.split(':');
+    const lista = tipo === 'h' ? HEADLINES : LEGENDAS;
+    const p = lista.find((x) => x.id === id);
+    if (!p) return;
+    const html = tipo === 'h' ? amostraHeadline(p, t, cor) : amostraLegenda(p, t, cor);
+    if (el.dataset.ultimo !== html) { el.innerHTML = html; el.dataset.ultimo = html; }
+  });
+}
+
+let animando = false;
+function animar() {
+  // Pinta uma vez ja: o requestAnimationFrame nao roda com a aba em segundo
+  // plano, e sem isso os cards ficariam vazios ate o navegador voltar ao ar.
+  desenharAmostras(0.9);
+  if (animando) return;
+  animando = true;
+  const passo = () => {
+    // So gasta quadro com a aba Estilo aberta.
+    if ($('#aba-estilo').classList.contains('on')) {
+      desenharAmostras((performance.now() / 1000) % CICLO);
+    }
+    requestAnimationFrame(passo);
+  };
+  requestAnimationFrame(passo);
+}
+
+function escolher(e, seletor, chave) {
+  const el = e.target.closest(seletor);
+  if (el) salvarEstilo({ [chave]: el.dataset.id });
+}
+
+async function salvarEstilo(patch) {
+  const r = await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/estilo`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
+  P.estilo = await r.json();
+  aplicarEstilo();
+}
+
+function aplicarEstilo() {
+  const s = P.estilo || {};
+  const cor = (s.corDestaque || '#FF5200').toUpperCase();
+  document.documentElement.style.setProperty('--destaque', cor);
+  $('#corPicker').value = cor;
+  $('#corHex').value = cor;
+  $('#bolaCor').style.background = cor;
+
+  $$('#tipoEdicao .card').forEach((el) => el.classList.toggle('on', el.dataset.id === s.tipoEdicao));
+  $$('#headlines .preset').forEach((el) => el.classList.toggle('on', el.dataset.id === s.estiloHeadline));
+  $$('#legendas .preset').forEach((el) => el.classList.toggle('on', el.dataset.id === s.estiloLegenda));
+  $$('#elementos .toggle').forEach((el) => el.classList.toggle('on', !!s.elementos?.[el.dataset.id]));
+  if (document.activeElement !== $('#obs')) $('#obs').value = s.observacoes || '';
+
+  // A dica só faz sentido quando nenhum dos presets escolhidos usa a cor.
+  const usamCor = ['contorno', 'destaque-cor', 'sublinhado'].includes(s.estiloHeadline)
+    || ['karaoke', 'karaoke-linhas'].includes(s.estiloLegenda);
+  $('#dicaCor').textContent = usamCor ? '' : 'os estilos escolhidos não usam destaque';
+
+  $('#resumoEstilo').textContent = [
+    TIPOS_EDICAO.find((t) => t.id === s.tipoEdicao)?.nome,
+    `headline ${HEADLINES.find((h) => h.id === s.estiloHeadline)?.nome || '—'}`,
+    `legenda ${LEGENDAS.find((l) => l.id === s.estiloLegenda)?.nome || '—'}`,
+    ...ELEMENTOS.filter((e) => s.elementos?.[e.id]).map((e) => e.nome),
+  ].filter(Boolean).join(' · ');
+}
+
+$('#corPicker').oninput = (e) => salvarEstilo({ corDestaque: e.target.value });
+$('#corHex').onchange = (e) => {
+  if (/^#[0-9a-f]{6}$/i.test(e.target.value)) salvarEstilo({ corDestaque: e.target.value });
+  else e.target.value = (P.estilo.corDestaque || '#FF5200').toUpperCase();
+};
+/*
+ * Campos de texto: guardam sozinhos depois que você para de digitar, e SEMPRE
+ * antes de renderizar. `pendente` é o que ainda não foi para o servidor —
+ * clicar em renderizar logo depois de digitar precisa esperar isso.
+ */
+let pendente = null;
+let tTexto;
+
+function guardarTexto(campo, salvar) {
+  const el = $(`#${campo}`);
+  el.oninput = () => {
+    clearTimeout(tTexto);
+    const v = el.value;
+    pendente = () => salvar(v);
+    tTexto = setTimeout(() => { const f = pendente; pendente = null; return f && f(); }, 450);
+  };
+  // Sair do campo salva na hora, sem esperar o tempo.
+  el.onblur = () => {
+    clearTimeout(tTexto);
+    if (pendente) { const f = pendente; pendente = null; f(); }
+  };
+}
+
+async function descarregarTexto() {
+  clearTimeout(tTexto);
+  if (!pendente) return;
+  const f = pendente;
+  pendente = null;
+  await f();
+}
+
+guardarTexto('obs', (v) => salvarEstilo({ observacoes: v }));
+guardarTexto('headline', (v) => salvarFase2({ headline: v }));
+
+$('#btnFase2').onclick = async () => {
+  if (P.fase1?.status !== 'aprovada') {
+    $('#logEtapa').textContent = 'fase 2';
+    $('#logMsg').textContent = 'Aprove o corte da Fase 1 antes de renderizar.';
+    $$('.abas button')[0].click();
+    return;
+  }
+  // Sem isto, digitar a headline e clicar em renderizar em menos de meio
+  // segundo mandava o texto antigo para o render.
+  await descarregarTexto();
+  await enfileirar('fase2', { nome: P.nome });
+  $('#logEtapa').textContent = 'fase 2';
+  $('#logMsg').textContent = 'Render da Fase 2 na fila.';
+  $$('.abas button')[2].click();
+};
+
+/* ---------------------------------------------------------------- ws */
+const ws = new WebSocket(`ws://${location.host}/ws`);
+ws.onmessage = (ev) => {
+  const m = JSON.parse(ev.data);
+  if (m.tipo === 'projeto' && m.projeto.nome === P?.nome) aplicar(m.projeto);
+  if (m.tipo === 'lista') { listarProjetos(); desenharProjetos(); }
+  if (m.tipo === 'fila') {
+    desenharFila(m.estado);
+    // Um trabalho terminou: recarrega o projeto aberto e a tabela.
+    if (!m.estado.atual) {
+      desenharProjetos();
+      // Abre o projeto que acabou de ficar pronto — senão você sobe um vídeo,
+      // ele processa, e a tela continua mostrando o anterior.
+      const ultimo = m.estado.feitos?.at(-1);
+      if (ultimo && ultimo.tipo === 'fase1' && ultimo.status === 'pronto'
+          && ultimo.nome !== P?.nome && ultimo.id !== ultimoAberto) {
+        ultimoAberto = ultimo.id;
+        listarProjetos().then(() => {
+          $('#selProjeto').value = ultimo.nome;
+          abrir(ultimo.nome);
+          $$('.abas button')[0].click();
+        });
+      } else if (P) abrir(P.nome);
+    }
+  }
+  if (m.tipo === 'progresso') {
+    $('#logEtapa').textContent = `${m.item.tipo} · ${m.item.nome}`;
+    $('#logMsg').textContent = m.item.msg || '';
+    $('#logBarra').style.width = `${m.item.pct || 0}%`;
+    const mini = document.querySelector('#painelFila .itemFila .mini i');
+    if (mini) mini.style.width = `${m.item.pct || 0}%`;
+    const msg = document.querySelector('#painelFila .itemFila .msg');
+    if (msg) msg.textContent = m.item.msg || '';
+  }
+  if (m.tipo === 'log') {
+    $('#logEtapa').textContent = m.etapa || '';
+    $('#logMsg').textContent = m.msg || '';
+    $('#logBarra').style.width = `${m.pct || 0}%`;
+  }
+};
+
+montarEstilo();
+listarProjetos();
+
+/* ================================================================== fase 2 */
+
+function aplicarFase2() {
+  const f2 = P.fase2 || {};
+  // Não pisa no que ele está digitando agora.
+  if (document.activeElement !== $('#headline')) {
+    $('#headline').value = f2.headline || f2.headlineSugerida || '';
+  }
+  $('#headlineDica').textContent = f2.headline
+    ? 'headline própria' : 'sugestão a partir do HOOK — edite se quiser';
+
+  const broll = f2.broll || [];
+  $('#brollStatus').textContent = broll.length
+    ? `${broll.length} imagem(ns)` : 'sem b-roll — a tela dividida cai para Limpa';
+  $('#brollTira').innerHTML = broll.map((b) =>
+    `<img src="/midia/${encodeURIComponent(P.nome)}/broll/${encodeURIComponent(b)}" alt="">`).join('');
+  $('#trilhaStatus').textContent = f2.trilha || 'sem trilha';
+
+  const pronta = f2.status === 'pronta' && f2.arquivo;
+  $('#visualVazio').style.display = pronta ? 'none' : '';
+  $('#visualConteudo').style.display = pronta ? '' : 'none';
+  if (!pronta) return;
+
+  const v = tlVisual.player;
+  const src = `/midia/${encodeURIComponent(P.nome)}/${f2.arquivo}?v=${f2.renderizadaEm || ''}`;
+  if (v.dataset.src !== src) {
+    v.dataset.src = src;
+    v.src = src;
+    // Sem isso o preview fica preto até alguém dar play: adianta um quadro.
+    v.addEventListener('loadedmetadata', () => { v.currentTime = 0.05; }, { once: true });
+  }
+
+  const av = f2.avisos || [];
+  $('#avisos2').style.display = av.length ? '' : 'none';
+  $('#avisos2').innerHTML = av.length
+    ? `<b>Avisos do último render</b><ul>${av.map((a) => `<li>${a}</li>`).join('')}</ul>` : '';
+
+  tlVisual.desenhar();
+}
+
+$('#fBroll').onchange = async (e) => {
+  if (!e.target.files.length) return;
+  const fd = new FormData();
+  [...e.target.files].forEach((f) => fd.append('imagens', f));
+  await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/broll`, { method: 'POST', body: fd });
+  e.target.value = '';
+  abrir(P.nome);
+};
+
+$('#fTrilha').onchange = async (e) => {
+  if (!e.target.files[0]) return;
+  const fd = new FormData();
+  fd.append('audio', e.target.files[0]);
+  await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/trilha`, { method: 'POST', body: fd });
+  e.target.value = '';
+  abrir(P.nome);
+};
+
+$('#btnTirarTrilha').onclick = async () => {
+  await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/trilha`, { method: 'DELETE' });
+  abrir(P.nome);
+};
+
+/* =============================================================== projetos */
+
+async function enfileirar(tipo, dados) {
+  await fetch(`/api/fila/${tipo}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(dados) });
+}
+
+const solta = $('#solta');
+const EXT_ACEITAS = /\.(mov|mp4|m4v|avi|mkv|webm|mpg|mpeg|3gp)$/i;
+
+/** Uma linha de recado dentro da caixa de arrastar — o upload não pode falhar calado. */
+function recado(texto, tipo = 'ok') {
+  const el = $('#recadoUp');
+  el.textContent = texto;
+  el.className = `recadoUp ${tipo}`;
+  el.style.display = texto ? '' : 'none';
+}
+
+['dragenter', 'dragover'].forEach((ev) => solta.addEventListener(ev, (e) => {
+  e.preventDefault(); solta.classList.add('sobre');
+}));
+['dragleave', 'drop'].forEach((ev) => solta.addEventListener(ev, (e) => {
+  e.preventDefault(); solta.classList.remove('sobre');
+}));
+solta.addEventListener('drop', (e) => {
+  const todos = [...e.dataTransfer.files];
+  const bons = todos.filter((f) => EXT_ACEITAS.test(f.name));
+  const ruins = todos.filter((f) => !EXT_ACEITAS.test(f.name));
+  if (ruins.length) {
+    recado(`Não dá para usar: ${ruins.map((f) => f.name).join(', ')}. `
+      + 'Aceito .mov .mp4 .m4v .avi .mkv .webm .mpg .3gp', 'erro');
+  }
+  if (bons.length) subirVideos(bons);
+  else if (!ruins.length) recado('Nenhum arquivo veio no arrasto.', 'erro');
+});
+$('#fVideos').onchange = (e) => {
+  const arqs = [...e.target.files];
+  e.target.value = '';
+  if (arqs.length) subirVideos(arqs);
+};
+
+// XHR em vez de fetch porque só ele dá progresso de upload — e vídeo é grande.
+function subirVideos(arquivos) {
+  const fd = new FormData();
+  arquivos.forEach((f) => fd.append('videos', f));
+  const total = arquivos.reduce((s, f) => s + f.size, 0);
+  const nomes = arquivos.map((f) => f.name).join(', ');
+  const barra = $('#barraUp');
+  barra.style.display = '';
+  recado(`Enviando ${nomes} (${(total / 1048576).toFixed(0)} MB)…`);
+
+  const x = new XMLHttpRequest();
+  x.open('POST', '/api/upload');
+  x.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    const pct = (e.loaded / e.total) * 100;
+    barra.firstElementChild.style.width = `${pct}%`;
+    recado(`Enviando ${nomes} — ${pct.toFixed(0)}%`);
+  };
+  x.onload = () => {
+    barra.style.display = 'none';
+    barra.firstElementChild.style.width = '0';
+    let r = {};
+    try { r = JSON.parse(x.responseText); } catch { /* resposta estranha */ }
+    if (x.status !== 200) {
+      recado(`O servidor recusou (HTTP ${x.status}). Veja o terminal do preview.`, 'erro');
+      return;
+    }
+    const partes = [];
+    if (r.enfileirados) partes.push(`${r.enfileirados} vídeo(s) na fila`);
+    if (r.recusados?.length) {
+      partes.push(`recusados: ${r.recusados.join(', ')} — aceito ${(r.aceitos || []).join(', ')}`);
+    }
+    recado(partes.join(' · ') || 'Nada foi enviado.', r.enfileirados ? 'ok' : 'erro');
+    listarProjetos();
+    desenharProjetos();
+  };
+  x.onerror = () => {
+    barra.style.display = 'none';
+    recado('Falhou o envio — o servidor do preview está rodando? (npm run preview)', 'erro');
+  };
+  x.send(fd);
+}
+
+$('#btnVarrer').onclick = async () => {
+  const r = await (await fetch('/api/varrer', { method: 'POST' })).json();
+  recado(r.enfileirados
+    ? `${r.enfileirados} vídeo(s) novo(s) da pasta de entrada entraram na fila`
+    : 'Nada novo na pasta de entrada — os vídeos de lá já viraram projeto.',
+  r.enfileirados ? 'ok' : 'erro');
+};
+
+$('#btnLoteFase2').onclick = async () => {
+  const lista = await (await fetch('/api/projetos')).json();
+  const alvos = lista.filter((p) => p.statusFase1 === 'aprovada' && p.statusFase2 !== 'pronta');
+  if (!alvos.length) return void ($('#logMsg').textContent = 'nenhum projeto aprovado esperando');
+  for (const p of alvos) await enfileirar('fase2', { nome: p.nome });
+  $('#logMsg').textContent = `${alvos.length} render(s) na fila`;
+};
+
+function desenharFila(estado) {
+  const linha = (i) => `
+    <div class="itemFila">
+      <span class="tipo">${{ fase1: 'FASE 1', fase2: 'FASE 2', refazer: 'REFAZER' }[i.tipo]}</span>
+      <span class="nome">${i.nome}</span>
+      <span class="msg">${i.status === 'erro' ? `⚠ ${i.msg}` : i.msg}</span>
+      <span class="mini"><i style="width:${i.pct || 0}%"></i></span>
+    </div>`;
+
+  const { atual, fila, feitos } = estado;
+  const tudo = [atual, ...fila, ...[...feitos].reverse()].filter(Boolean);
+  $('#painelFila').innerHTML = tudo.length
+    ? tudo.map(linha).join('')
+    : '<div class="sub">Fila vazia.</div>';
+  const pendentes = (atual ? 1 : 0) + fila.length;
+  $('#contFila').textContent = pendentes || '';
+  $('#chatFila').textContent = atual ? `${atual.tipo} · ${atual.msg}`.slice(0, 42)
+    : (pendentes ? `${pendentes} na fila` : '');
+}
+
+async function desenharProjetos() {
+  const lista = await (await fetch('/api/projetos')).json();
+  const selo = (s, ok) => `<span class="selo ${ok ? 'ok' : 'espera'}">${s}</span>`;
+  $('#tabelaProjetos').innerHTML = lista.length ? lista.map((p) => `
+    <div class="linhaProj">
+      <span class="nome" data-abrir="${p.nome}">${p.nome}</span>
+      <span class="dur">${p.duracao ? `${p.duracao.toFixed(1)}s` : '—'}</span>
+      ${selo(`F1 ${p.statusFase1}`, p.statusFase1 === 'aprovada')}
+      ${selo(`F2 ${p.statusFase2}`, p.statusFase2 === 'pronta')}
+      <span class="acoesProj">
+        <button data-f2="${p.nome}" ${p.statusFase1 !== 'aprovada' ? 'disabled' : ''}>Fase 2</button>
+        <button data-apagar="${p.nome}">Apagar</button>
+      </span>
+    </div>`).join('') : '<div class="sub" style="padding:14px 16px">Nenhum projeto ainda.</div>';
+
+  $('#tabelaProjetos').querySelectorAll('[data-abrir]').forEach((el) => {
+    el.onclick = () => {
+      $('#selProjeto').value = el.dataset.abrir;
+      abrir(el.dataset.abrir);
+      $$('.abas button')[0].click();
+    };
+  });
+  $('#tabelaProjetos').querySelectorAll('[data-f2]').forEach((el) => {
+    el.onclick = () => enfileirar('fase2', { nome: el.dataset.f2 });
+  });
+  $('#tabelaProjetos').querySelectorAll('[data-apagar]').forEach((el) => {
+    el.onclick = async () => {
+      if (!confirm(`Apagar o projeto "${el.dataset.apagar}" e todos os arquivos dele?`)) return;
+      await fetch(`/api/projeto/${encodeURIComponent(el.dataset.apagar)}`, { method: 'DELETE' });
+      listarProjetos(); desenharProjetos();
+    };
+  });
+}
+
+fetch('/api/fila').then((r) => r.json()).then(desenharFila);
+// O rodapé do chat mostra quem está respondendo: o Claude ou os comandos fixos.
+let modoChat = { modo: 'comandos' };
+fetch('/api/chat/modo').then((r) => r.json()).then((m) => {
+  modoChat = m;
+  $('#chatTexto').placeholder = m.modo === 'comandos'
+    ? 'Comandos: aprovar, cor #FF5200, refazer o corte…'
+    : 'Fala comigo: "corta os silêncios", "deixa a legenda amarela"…';
+  if (P) desenharConversa();
+});
+
+// Clicar no contador libera mais conversa neste projeto.
+$('#chatDica').onclick = async () => {
+  if (modoChat.modo !== 'claude' || !P) return;
+  if (!confirm(`Liberar mais ${modoChat.limite} mensagens de conversa em "${P.nome}"?`)) return;
+  await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/chat/zerar`, { method: 'POST' });
+  abrir(P.nome);
+};
+desenharProjetos();
+
+/** Guarda os campos da Fase 2 (headline, volume da trilha) no projeto. */
+async function salvarFase2(patch) {
+  const r = await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/fase2`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (r.ok) P.fase2 = { ...P.fase2, ...(await r.json()) };
+  return r.ok;
+}
+
+/* ================================================================== chat */
+/*
+ * O chat lateral mostra o passo a passo que o pipeline escreveu no projeto e
+ * aceita comandos. Ele NAO e um modelo de linguagem: entende um conjunto fixo
+ * de frases (src/server/comandos.js) e diz quando nao entendeu.
+ */
+
+const FASE_ROTULO = {
+  'aguardando-aprovacao': 'aguardando você',
+  aprovada: 'corte aprovado',
+  ajustar: 'para ajuste',
+  editado: 'timeline editada',
+};
+
+function desenharConversa() {
+  const caixa = $('#conversa');
+  const msgs = P?.conversa || [];
+  $('#chatProjeto').textContent = P?.nome || 'Edvid';
+  $('#chatFase').textContent = FASE_ROTULO[P?.fase1?.status] || '';
+
+  // Rodapé: quem responde e quanta conversa resta neste projeto.
+  const dica = $('#chatDica');
+  if (modoChat.modo === 'local') {
+    dica.textContent = `${modoChat.modelo} · local, de graça`;
+    dica.style.cursor = '';
+    dica.title = 'modelo rodando na sua máquina; não custa nada';
+    dica.style.color = '';
+  } else if (modoChat.modo === 'claude') {
+    const usadas = P?.chat?.usadas || 0;
+    const restam = Math.max(0, modoChat.limite - usadas);
+    dica.textContent = `claude opus 5 · ${restam}/${modoChat.limite} mensagens`;
+    dica.style.cursor = 'pointer';
+    dica.title = 'clique para liberar mais conversa neste projeto';
+    dica.style.color = restam === 0 ? 'var(--rosa)' : '';
+  } else {
+    dica.textContent = 'comandos fixos · sem chave da API';
+    dica.style.cursor = '';
+    dica.title = '';
+  }
+
+  if (!msgs.length) {
+    caixa.innerHTML = '<div class="msg edvid">Sem conversa ainda. '
+      + 'Rode a Fase 1 num vídeo que eu conto aqui o que fiz em cada passo.</div>';
+    return;
+  }
+
+  const perto = caixa.scrollHeight - caixa.scrollTop - caixa.clientHeight < 60;
+  caixa.innerHTML = msgs.map((m, i) => {
+    if (m.tipo === 'acao') {
+      return `<div>
+        <div class="msgAcao" data-abre="${i}">
+          <span class="seta">&#9656;</span>
+          <span>Escreveu <b class="arq">${m.arquivo}</b>, ${m.ferramentas} ferramenta${
+            m.ferramentas > 1 ? 's' : ''}</span>
+          <span class="mais">+${m.mais}</span><span class="menos">-${m.menos}</span>
+        </div>
+        <div class="detalheAcao">${m.detalhe || ''}</div>
+      </div>`;
+    }
+    if (m.tipo === 'tabela') {
+      return `<div class="msg edvid">${m.titulo}
+        <table class="tabelaCorte"><thead><tr><th>#</th><th>Beat</th><th>Fala</th></tr></thead>
+        <tbody>${m.linhas.map((l) => `<tr><td class="n">${l.n}</td>
+          <td class="beat" style="color:${CORES_BLOCO[l.beat] || 'inherit'}">${l.beat}</td>
+          <td>“${l.fala}”</td></tr>`).join('')}</tbody></table></div>`;
+    }
+    return `<div class="msg ${m.quem}">${destacarArquivos(m.texto)}</div>`;
+  }).join('');
+
+  caixa.querySelectorAll('[data-abre]').forEach((el) => {
+    el.onclick = () => el.classList.toggle('aberta');
+  });
+  if (perto) caixa.scrollTop = caixa.scrollHeight;
+}
+
+// Nomes de arquivo ganham cor, como na referência.
+const destacarArquivos = (t = '') => t
+  .replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+  .replace(/\b([\w-]+\.(?:mp4|mov|json|md|mp3|jpg|png))\b/g, '<span class="arq">$1</span>');
+
+$('#chatForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const campo = $('#chatTexto');
+  const texto = campo.value.trim();
+  if (!texto || !P) return;
+  campo.value = '';
+  campo.disabled = true;
+  try {
+    const r = await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/conversa`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ texto }),
+    });
+    if (r.ok) await abrir(P.nome);
+  } finally {
+    campo.disabled = false;
+    campo.focus();
+  }
+};
