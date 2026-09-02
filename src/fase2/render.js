@@ -2,8 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundle } from '@remotion/bundler';
-import { renderMedia, selectComposition } from '@remotion/renderer';
-import { RAIZ } from '../shared/config.js';
+import { renderMedia, selectComposition, makeCancelSignal } from '@remotion/renderer';
+import {
+  BUNDLE_DIR, REMOTION_CONCURRENCY, X264_PRESET, CRF, TIMEOUTS,
+} from '../shared/config.js';
 import { caminhoProjeto, carregar, salvar } from '../fase1/projeto.js';
 import { gerarPicos } from '../fase1/render.js';
 import { ffprobe } from '../shared/exec.js';
@@ -11,7 +13,7 @@ import { narra, acao, seg } from '../shared/conversa.js';
 
 const aqui = path.dirname(fileURLToPath(import.meta.url));
 const ENTRADA = path.join(aqui, '..', '..', 'remotion', 'index.jsx');
-const CACHE_BUNDLE = path.join(RAIZ, '.remotion-bundle');
+const CACHE_BUNDLE = BUNDLE_DIR;
 
 // Empacotar o Remotion leva ~20 s; um bundle so serve para todos os projetos,
 // que e o que torna o processamento em lote viavel.
@@ -146,17 +148,30 @@ export async function rodarFase2(nome, { log = () => {} } = {}) {
   });
 
   log({ etapa: 'fase2', msg: 'Renderizando a Fase 2' });
-  await renderMedia({
-    composition: composicao,
-    serveUrl: servedUrl,
-    codec: 'h264',
-    outputLocation: saida,
-    inputProps: { projeto },
-    concurrency: null,
-    onProgress: ({ progress }) => log({
-      etapa: 'fase2', msg: 'Renderizando a Fase 2', pct: progress * 100,
-    }),
-  });
+  const { cancelSignal, cancel } = makeCancelSignal();
+  let estourou = false;
+  const temporizador = setTimeout(() => { estourou = true; cancel(); }, TIMEOUTS.render);
+  try {
+    await renderMedia({
+      composition: composicao,
+      serveUrl: servedUrl,
+      codec: 'h264',
+      outputLocation: saida,
+      inputProps: { projeto },
+      concurrency: REMOTION_CONCURRENCY,
+      x264Preset: X264_PRESET,
+      crf: CRF,
+      cancelSignal,
+      onProgress: ({ progress }) => log({
+        etapa: 'fase2', msg: 'Renderizando a Fase 2', pct: progress * 100,
+      }),
+    });
+  } catch (e) {
+    if (estourou) throw new Error('tempo esgotado: render da fase 2');
+    throw e;
+  } finally {
+    clearTimeout(temporizador);
+  }
 
   // A aba Fase 2 desenha a timeline do video final, entao ela precisa da
   // waveform e da duracao reais do arquivo entregue.

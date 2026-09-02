@@ -2,24 +2,36 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ffmpeg, run } from '../shared/exec.js';
-import { MODELO_WHISPER } from '../shared/config.js';
+import {
+  MODELO_WHISPER, WHISPER_CLI, WHISPER_MODO, TRANSCRITOR_URL, TIMEOUTS,
+} from '../shared/config.js';
 
-/** Extrai o audio do video em WAV 16k mono, que e o que o whisper.cpp aceita. */
+/** Extrai o audio do video em WAV 16k mono, que e o que o whisper aceita. */
 export async function extrairWav(video, destino, { onLinha } = {}) {
   await ffmpeg(['-i', video, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', destino], { onLinha });
   return destino;
 }
 
 /**
- * Transcreve com whisper.cpp em nivel de palavra.
- * Devolve [{ inicio, fim, texto }] em segundos.
+ * Transcreve em nivel de palavra. Devolve [{ inicio, fim, texto }] em segundos.
+ *
+ * WHISPER_MODO=cpp (padrao, Mac do Gabriel) roda o whisper-cli local.
+ * WHISPER_MODO=transcritor (VPS) chama o sidecar Python — nunca cai para o
+ * cpp em caso de erro, porque o cpp nao existe la dentro do container.
  */
 export async function transcreverPalavras(wav, pastaTrabalho, { idioma = 'pt', onLinha } = {}) {
+  if (WHISPER_MODO === 'transcritor') {
+    return transcreverViaSidecar(wav);
+  }
+  return transcreverViaCpp(wav, pastaTrabalho, { idioma, onLinha });
+}
+
+async function transcreverViaCpp(wav, pastaTrabalho, { idioma, onLinha }) {
   if (!fs.existsSync(MODELO_WHISPER)) {
     throw new Error(`Modelo do Whisper nao encontrado em ${MODELO_WHISPER}`);
   }
   const base = path.join(pastaTrabalho, 'transcricao');
-  await run('whisper-cli', [
+  await run(WHISPER_CLI, [
     '-m', MODELO_WHISPER,
     '-f', wav,
     '-l', idioma,
@@ -28,7 +40,7 @@ export async function transcreverPalavras(wav, pastaTrabalho, { idioma = 'pt', o
     '--max-len', '1',
     '--split-on-word',
     '-t', String(Math.max(4, os.cpus().length - 2)),
-  ], { onLinha });
+  ], { onLinha, timeoutMs: TIMEOUTS.whisper });
 
   const j = JSON.parse(fs.readFileSync(`${base}.json`, 'utf8'));
   return j.transcription
@@ -37,6 +49,28 @@ export async function transcreverPalavras(wav, pastaTrabalho, { idioma = 'pt', o
       fim: s.offsets.to / 1000,
       texto: s.text.trim(),
     }))
+    .filter((p) => p.texto.length > 0);
+}
+
+/** Transcreve pelo sidecar Python (faster-whisper) que roda ao lado na VPS. */
+async function transcreverViaSidecar(wav) {
+  const url = `${TRANSCRITOR_URL}/transcrever`;
+  const forma = new FormData();
+  forma.append('audio', new Blob([fs.readFileSync(wav)]), path.basename(wav));
+
+  let resposta;
+  try {
+    resposta = await fetch(url, { method: 'POST', body: forma });
+  } catch {
+    throw new Error(`transcritor nao respondeu em ${url}`);
+  }
+  if (!resposta.ok) {
+    throw new Error(`transcritor nao respondeu em ${url} (HTTP ${resposta.status})`);
+  }
+
+  const j = await resposta.json();
+  return (j.palavras || [])
+    .map((p) => ({ inicio: p.inicio, fim: p.fim, texto: String(p.texto).trim() }))
     .filter((p) => p.texto.length > 0);
 }
 

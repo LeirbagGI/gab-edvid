@@ -66,18 +66,27 @@ O botão **Confirmar e iniciar a Fase 2** (aba Estilo) e o comando
 
 | Modo | Quando | Custo | Confiabilidade |
 |---|---|---|---|
-| **Claude** | há chave em `~/gab-edvid/.env` | por token | alta |
+| **Claude** | a ponte-claude está de pé e responde `/saude` | pela assinatura, sem chave | alta |
 | **Local** | Ollama rodando com o modelo baixado | **zero** | boa, erra às vezes |
 | **Comandos** | nenhum dos dois | zero | só as frases fixas |
 
 O sistema escolhe sozinho, nessa ordem. O rodapé do chat diz em qual você está.
 
+**Modo Claude** fala com a **ponte-claude**: um serviço fora deste repositório
+que chama o Claude CLI da assinatura (`claude -p`, modelo `claude-fable-5-1`).
+Não existe `ANTHROPIC_API_KEY` em lugar nenhum — quem autentica é o
+`ant auth login` do lado da ponte. As ferramentas do editor (aprovar, mudar
+estilo, ligar elemento...) são expostas por um servidor MCP embutido
+(`src/server/mcp.js`, rota `/mcp/:nome`), e o Claude as chama por lá — mesma
+lógica dos botões, sem caminho paralelo. `PONTE_URL` (`~/gab-edvid/.env`, veja
+`.env.exemplo`) diz onde a ponte está; o padrão é `http://127.0.0.1:4821`.
+
 **Modo local** (grátis, offline): `brew install ollama`, depois `ollama serve` e
 `ollama pull qwen2.5:7b`. Roda na sua máquina, não manda nada para fora, não
-consome cota. Um modelo de 7B erra mais que o Opus: às vezes chama a ferramenta
-errada ou nenhuma.
+consome cota. Um modelo de 7B erra mais que o Fable: às vezes chama a
+ferramenta errada ou nenhuma.
 
-**Por isso existe a trava de verdade** (`conferir`, em `src/server/cerebro.js`):
+**Por isso existe a trava de verdade** (`conferir`, em `src/server/ferramentas.js`):
 o texto do modelo é conferido contra as ferramentas que realmente rodaram. Se
 ele disser "mudei a cor" sem ter mudado, o chat mostra o aviso:
 
@@ -86,21 +95,13 @@ ele disser "mudei a cor" sem ter mudado, o chat mostra o aviso:
 Nunca confie na prosa do modelo: confie na linha `✓`, que vem do resultado real
 da ferramenta.
 
-O rodapé do chat diz em qual modo você está. Sem chave nada quebra: cai no
-interpretador de comandos (`src/server/comandos.js`).
+O rodapé do chat diz em qual modo você está. Sem a ponte no ar nada quebra:
+cai no modelo local ou, na falta dele, no interpretador de comandos
+(`src/server/comandos.js`).
 
-**Para ligar a conversa livre:**
-
-1. Gere uma chave em `console.anthropic.com` → Settings → API keys.
-2. `cp ~/gab-edvid/.env.exemplo ~/gab-edvid/.env` e cole a chave lá.
-3. Reinicie o `npm run preview`.
-
-A chave fica em `~/gab-edvid/.env`, **fora do Google Drive** — esta pasta é um
-Drive compartilhado e segredo não entra nela. O `.env` está no `.gitignore`.
-
-**Limite de 20 mensagens por projeto.** Cada mensagem no modo Claude é cobrada
-por token, então cada projeto tem uma cota. O rodapé do chat mostra quanto
-resta (`claude opus 5 · 14/20 mensagens`) e avisa nas três últimas.
+**Limite de 20 mensagens por projeto.** Cada mensagem no modo Claude custa
+tokens da assinatura, então cada projeto tem uma cota. O rodapé do chat mostra
+quanto resta (`fable 5.1 · 14/20 mensagens`) e avisa nas três últimas.
 
 Ao acabar a cota o chat **não trava**: cai nos comandos fixos e diz por quê.
 Clicar no contador libera mais 20 naquele projeto. O modo de comandos é de
@@ -108,9 +109,10 @@ graça e nunca consome cota. O número está em `src/shared/config.js`
 (`LIMITE_CHAT`).
 
 No modo Claude ele usa as mesmas ações do resto do sistema como ferramentas
-(`src/server/cerebro.js`): aprovar, pedir ajuste, refazer o corte, renderizar a
-Fase 2, mudar estilo, ligar/desligar elemento, ligar/desligar clipe e mostrar a
-tabela do corte. Ele não tem caminho paralelo — faz o mesmo que os botões.
+(`src/server/ferramentas.js`): aprovar, pedir ajuste, refazer o corte,
+renderizar a Fase 2, mudar estilo, ligar/desligar elemento, ligar/desligar
+clipe e mostrar a tabela do corte. Ele não tem caminho paralelo — faz o mesmo
+que os botões.
 
 ## Fase 1 — o corte orgânico
 

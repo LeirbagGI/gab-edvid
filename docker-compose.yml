@@ -1,0 +1,54 @@
+# Stack do Edvid em /opt/edvid/app, na mesma VPS do gestaoimpacto (134.199.251.30).
+#
+# Entra na rede EXTERNA do Traefik do gestaoimpacto (gestaoimpacto_web — confirmado em
+# /opt/gestaoimpacto/docker-compose.yml e `docker network ls` na VPS) para ganhar rota
+# HTTPS, e numa rede interna própria (edvid_internal) para o dia em que o sidecar
+# `transcritor` entrar (arquitetura: docs/planejamento/architecture.md).
+#
+# MVP sem login (decisão do William, 02/09): nenhum middleware de auth no router.
+#
+# Domínio: ainda não há DNS para editor.gestaoimpacto.com, então o Host abaixo usa
+# editor.134-199-251-30.sslip.io (sslip.io resolve sozinho pro IP no próprio nome, sem
+# precisar cadastrar DNS nenhum). Quando o domínio definitivo tiver DNS apontado, troque
+# só o valor dentro de Host(`...`) na label do router.
+name: edvid
+
+services:
+  edvid:
+    build: .
+    container_name: edvid
+    restart: unless-stopped
+    # 127.0.0.1: só a ponte-claude (no host) e o Traefik (via rede) precisam alcançar a
+    # porta; nada de expor 4820 pra internet direto.
+    ports:
+      - "127.0.0.1:4820:4820"
+    volumes:
+      - /opt/edvid/dados:/dados
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    cpus: "3"
+    mem_limit: 3g
+    # Opcional: sobrescrever variáveis do ENV da imagem sem rebuildar (ex.: trocar
+    # WHISPER_MODO). `required: false` porque hoje não existe nenhum `.env` — sem isso o
+    # `docker compose up` falharia por causa de um env_file que não existe.
+    env_file:
+      - path: .env
+        required: false
+    networks:
+      - gestaoimpacto_web
+      - edvid_internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.edvid.rule=Host(`editor.134-199-251-30.sslip.io`)"
+      - "traefik.http.routers.edvid.entrypoints=websecure"
+      - "traefik.http.routers.edvid.tls=true"
+      - "traefik.http.routers.edvid.tls.certresolver=le"
+      - "traefik.http.services.edvid.loadbalancer.server.port=4820"
+
+networks:
+  # Rede do Traefik do gestaoimpacto — já existe na VPS, criada pelo stack dele.
+  gestaoimpacto_web:
+    external: true
+  # Própria do Edvid; hoje só o serviço edvid está nela, fica pronta pro `transcritor`.
+  edvid_internal:
+    name: edvid_internal

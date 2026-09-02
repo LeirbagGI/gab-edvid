@@ -10,13 +10,22 @@ import { headlinePadrao, lerBroll, lerTrilha } from '../fase2/render.js';
 import { diz } from '../shared/conversa.js';
 import { fila } from './fila.js';
 import { interpretar } from './comandos.js';
-import { conversar, temChave, cota, temCota } from './cerebro.js';
+import { conversar, temPonte, cota, temCota, MODELO } from './cerebro.js';
 import { conversarLocal, ollamaPronto } from './local.js';
+import { montarMcp } from './mcp.js';
 
 const aqui = path.dirname(fileURLToPath(import.meta.url));
 const PUBLICO = path.join(aqui, '..', '..', 'public');
 const COMPARTILHADO = path.join(aqui, '..', 'shared');
 const app = express();
+
+// O MCP precisa entrar ANTES do express.json(): o transporte streamable le
+// o corpo cru da requisicao sozinho, e um express.json() anterior ja teria
+// drenado o stream, deixando o corpo vazio para o SDK. `transmitir` e
+// `function` hoisted — a referencia aqui resolve certo mesmo declarada
+// depois no arquivo.
+montarMcp(app, { carregar, salvar, transmitir, fila });
+
 app.use(express.json({ limit: '2mb' }));
 
 /*
@@ -156,12 +165,16 @@ app.post('/api/projeto/:nome/conversa', async (req, res) => {
     const atual = carregar(req.params.nome);
     if (!atual) return res.status(404).json({ erro: 'projeto nao encontrado' });
 
-    // Ordem: Claude (se ha chave e cota) -> modelo local (de graca) -> comandos.
-    const podeClaude = temChave() && temCota(atual);
+    // Ordem: Claude (se a ponte esta de pe e ha cota) -> modelo local (de graca) -> comandos.
+    const podePonte = await temPonte();
+    const podeClaude = podePonte && temCota(atual);
     const podeLocal = !podeClaude && await ollamaPronto();
 
     if (podeClaude) {
-      ({ projeto, trabalhos } = await conversar(req.params.nome, texto));
+      const nome = req.params.nome;
+      ({ projeto, trabalhos } = await conversar(nome, texto, {
+        aoParcial: (parcial) => transmitir({ tipo: 'chat-parcial', nome, texto: parcial }),
+      }));
     } else if (podeLocal) {
       ({ projeto, trabalhos } = await conversarLocal(req.params.nome, texto));
     } else {
@@ -169,7 +182,7 @@ app.post('/api/projeto/:nome/conversa', async (req, res) => {
       const r = interpretar(req.params.nome, texto);
       projeto = r.projeto;
       if (r.trabalho) trabalhos = [r.trabalho];
-      if (temChave() && !temCota(atual)) {
+      if (podePonte && !temCota(atual)) {
         diz(projeto, `A conversa livre deste projeto acabou (${cota(atual).limite} mensagens). `
           + 'Respondi pelos comandos fixos. Para liberar mais, clique no contador no rodapé do chat.');
         salvar(projeto);
@@ -195,7 +208,10 @@ app.post('/api/projeto/:nome/chat/zerar', (req, res) => {
 
 // O rodape do chat diz em que modo ele esta.
 app.get('/api/chat/modo', async (_req, res) => {
-  if (temChave()) return res.json({ modo: 'claude', limite: cota({}).limite });
+  if (await temPonte()) {
+    const { limite, restam } = cota({});
+    return res.json({ modo: 'claude', modelo: MODELO, limite, restam });
+  }
   if (await ollamaPronto()) return res.json({ modo: 'local', modelo: OLLAMA.modelo });
   res.json({ modo: 'comandos' });
 });
@@ -308,6 +324,8 @@ app.post('/api/varrer', (_req, res) => {
 
 const servidor = app.listen(PORTA_PREVIEW, () => {
   console.log(`\n  Edvid — preview em http://localhost:${PORTA_PREVIEW}/\n`);
+  // Fila persistente (A1): retoma o que ficou pendente de uma queda do servidor.
+  if (typeof fila.retomar === 'function') fila.retomar();
 });
 
 // Sem isto, porta ocupada vira um stack trace do Node e parece que o app quebrou.

@@ -1,48 +1,40 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
-import Anthropic from '@anthropic-ai/sdk';
-import { RAIZ, LIMITE_CHAT } from '../shared/config.js';
+import { PONTE_URL, LIMITE_CHAT, PORTA_PREVIEW } from '../shared/config.js';
 import { carregar, salvar } from '../fase1/projeto.js';
-import { diz, vocediz, tabelaDoCorte, seg } from '../shared/conversa.js';
-import { HEADLINES, LEGENDAS, TIPOS_EDICAO, ELEMENTOS, CORES } from '../shared/presets.js';
+import { diz, vocediz } from '../shared/conversa.js';
+import { conferir, situacao } from './ferramentas.js';
+import { iniciarRegistro, lerRegistro } from './mcp.js';
 
 /**
- * O cerebro do chat: conversa de verdade, com o Claude por tras.
+ * O cerebro do chat: conversa de verdade, com o Claude por tras — via a
+ * ponte-claude (CLI da assinatura do Fable 5.1, sem chave de API em lugar
+ * nenhum). As acoes que ele pode tomar sao as mesmas do resto do sistema:
+ * as ferramentas viram MCP em mcp.js, o Claude chama pelo `--mcp-config`.
  *
- * As acoes que ele pode tomar sao as mesmas do resto do sistema — nao existe
- * caminho paralelo. Sem chave configurada, quem responde e o interpretador de
- * comandos (comandos.js), e o chat avisa que esta no modo limitado.
+ * Sem a ponte no ar, quem responde e o interpretador de comandos
+ * (comandos.js), e o chat avisa que esta no modo limitado.
  */
 
-const MODELO = 'claude-opus-5';
+export const MODELO = 'claude-fable-5-1';
+
+let cachePonte = { ok: false, em: 0 };
 
 /**
- * Le a chave de um .env fora do Google Drive.
- * Esta pasta (~/gab-edvid) ja esta fora do Drive; o .env nunca vai para la.
+ * A ponte-claude esta de pe? Resultado em cache por 30s — bater em
+ * `/saude` a cada mensagem seria desperdicio, e a ponte nao cai e sobe
+ * o tempo todo.
  */
-export function lerChave() {
-  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
-  const env = path.join(RAIZ, '.env');
-  if (!fs.existsSync(env)) return null;
-  for (const linha of fs.readFileSync(env, 'utf8').split('\n')) {
-    const m = linha.match(/^\s*ANTHROPIC_API_KEY\s*=\s*(.+?)\s*$/);
-    if (m) return m[1].replace(/^["']|["']$/g, '');
+export async function temPonte() {
+  const agora = Date.now();
+  if (agora - cachePonte.em < 30000) return cachePonte.ok;
+  let ok = false;
+  try {
+    const r = await fetch(`${PONTE_URL}/saude`, { signal: AbortSignal.timeout(2000) });
+    ok = r.ok && (await r.json())?.ok === true;
+  } catch {
+    ok = false;
   }
-  return null;
-}
-
-/**
- * Ha alguma credencial da Anthropic disponivel?
- *
- * Aceita as duas formas: a chave num .env/variavel, ou um perfil gravado pelo
- * `ant auth login` — que o SDK resolve sozinho, sem chave escrita em lugar nenhum.
- */
-export function temChave() {
-  if (lerChave()) return true;
-  if (process.env.ANTHROPIC_AUTH_TOKEN) return true;
-  const perfil = path.join(os.homedir(), '.config', 'anthropic');
-  return fs.existsSync(perfil) && fs.readdirSync(perfil).length > 0;
+  cachePonte = { ok, em: agora };
+  return ok;
 }
 
 /** Quantas mensagens do modo Claude o projeto ja gastou e quantas restam. */
@@ -52,210 +44,6 @@ export function cota(projeto) {
 }
 
 export const temCota = (projeto) => cota(projeto).restam > 0;
-
-/* ------------------------------------------------------------ ferramentas */
-
-const lista = (arr) => arr.map((x) => x.id).join(' | ');
-
-export const FERRAMENTAS = [
-  {
-    name: 'aprovar_corte',
-    description: 'Aprova o corte da Fase 1. Só depois disso a Fase 2 pode rodar.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'pedir_ajuste',
-    description: 'Marca a Fase 1 como "precisa de ajuste", quando o corte não está bom.',
-    input_schema: {
-      type: 'object',
-      properties: { motivo: { type: 'string', description: 'O que está ruim.' } },
-      required: [],
-    },
-  },
-  {
-    name: 'refazer_corte',
-    description: 'Renderiza de novo o corte da Fase 1 com a timeline como está agora '
-      + '(clipes desligados, bordas aparadas). Use depois de mexer em clipes.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'renderizar_fase2',
-    description: 'Renderiza o vídeo final: headline, legenda, zoom, trilha. '
-      + 'Exige a Fase 1 aprovada.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-  {
-    name: 'mudar_estilo',
-    description: 'Muda as escolhas de estilo da Fase 2. Só mande os campos que o usuário pediu.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        tipoEdicao: { type: 'string', enum: TIPOS_EDICAO.map((t) => t.id) },
-        corDestaque: { type: 'string', description: 'Hex (#FF5200) OU um nome: '
-          + Object.keys(CORES).join(', ') + '. Prefira o nome — não invente hex.' },
-        estiloHeadline: { type: 'string', enum: HEADLINES.map((h) => h.id) },
-        estiloLegenda: { type: 'string', enum: LEGENDAS.map((l) => l.id) },
-        headline: { type: 'string', description: 'Texto da headline. \\n quebra a linha.' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'ligar_elemento',
-    description: `Liga ou desliga um elemento da edição. Ids: ${lista(ELEMENTOS)}`,
-    input_schema: {
-      type: 'object',
-      properties: {
-        elemento: { type: 'string', enum: ELEMENTOS.map((e) => e.id) },
-        ligado: { type: 'boolean' },
-      },
-      required: ['elemento', 'ligado'],
-    },
-  },
-  {
-    name: 'mexer_clipe',
-    description: 'Liga ou desliga um clipe da timeline. Desligado, ele sai do corte '
-      + 'quando você chamar refazer_corte.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        clipe: { type: 'string', description: 'Id do clipe, ex: c3' },
-        ativo: { type: 'boolean' },
-      },
-      required: ['clipe', 'ativo'],
-    },
-  },
-  {
-    name: 'mostrar_corte',
-    description: 'Mostra a tabela do corte no chat: número, beat e fala de cada clipe.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-];
-
-/** Executa a ferramenta e devolve o que contar de volta para o modelo. */
-export function executar(nome, entrada, projeto, trabalhos, registro = []) {
-  const r = fazer(nome, entrada, projeto, trabalhos);
-  registro.push({ ferramenta: nome, resultado: r });
-  return r;
-}
-
-function fazer(nome, entrada, projeto, trabalhos) {
-  switch (nome) {
-    case 'aprovar_corte':
-      if (!projeto.fase1?.clipes?.length) return 'Ainda não existe corte.';
-      projeto.fase1.status = 'aprovada';
-      return `Corte aprovado, ${seg(projeto.fase1.duracao)}.`;
-
-    case 'pedir_ajuste':
-      projeto.fase1.status = 'ajustar';
-      projeto.fase1.observacao = entrada.motivo || '';
-      return 'Marcado para ajuste.';
-
-    case 'refazer_corte':
-      trabalhos.push({ tipo: 'refazer', nome: projeto.nome });
-      return 'Refazer o corte entrou na fila.';
-
-    case 'renderizar_fase2':
-      if (projeto.fase1?.status !== 'aprovada') return 'A Fase 1 ainda não foi aprovada.';
-      trabalhos.push({ tipo: 'fase2', nome: projeto.nome });
-      return 'Render da Fase 2 entrou na fila.';
-
-    case 'mudar_estilo': {
-      const mudou = [];
-      for (const campo of ['tipoEdicao', 'estiloHeadline', 'estiloLegenda']) {
-        if (entrada[campo]) { projeto.estilo[campo] = entrada[campo]; mudou.push(`${campo}=${entrada[campo]}`); }
-      }
-      if (entrada.corDestaque) {
-        // Nome vira a cor da tabela; hex passa direto. Nada mais é aceito.
-        const pedida = String(entrada.corDestaque).trim();
-        const porNome = CORES[pedida.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')];
-        const hex = porNome || (/^#[0-9a-f]{6}$/i.test(pedida) ? pedida.toUpperCase() : null);
-        if (!hex) return `Não conheço a cor "${pedida}". Use um nome (${Object.keys(CORES).join(', ')}) ou um hex #RRGGBB.`;
-        projeto.estilo.corDestaque = hex;
-        mudou.push(`cor=${hex}`);
-      }
-      if (typeof entrada.headline === 'string') {
-        projeto.fase2 = { ...projeto.fase2, headline: entrada.headline };
-        mudou.push('headline');
-      }
-      return mudou.length ? `Mudei: ${mudou.join(', ')}.` : 'Nada mudou.';
-    }
-
-    case 'ligar_elemento':
-      projeto.estilo.elementos[entrada.elemento] = entrada.ligado;
-      return `${entrada.elemento}: ${entrada.ligado ? 'ligado' : 'desligado'}.`;
-
-    case 'mexer_clipe': {
-      const c = projeto.fase1?.clipes?.find((x) => x.id === entrada.clipe);
-      if (!c) return `Não existe o clipe ${entrada.clipe}.`;
-      c.ativo = entrada.ativo;
-      projeto.fase1.status = 'editado';
-      return `Clipe ${entrada.clipe} ${entrada.ativo ? 'religado' : 'desligado'}: "${c.texto.slice(0, 50)}".`;
-    }
-
-    case 'mostrar_corte':
-      if (!projeto.fase1?.clipes?.length) return 'Ainda não há corte.';
-      tabelaDoCorte(projeto);
-      return 'Tabela mostrada no chat.';
-
-    default:
-      return `Ferramenta desconhecida: ${nome}`;
-  }
-}
-
-
-/**
- * Guarda contra afirmacao falsa.
- *
- * Modelo pequeno as vezes escreve "mudei a cor" sem ter chamado ferramenta
- * nenhuma, ou depois de a ferramenta ter recusado. O chat nao pode afirmar o
- * que nao aconteceu: aqui o texto do modelo e conferido contra o que rodou.
- */
-export function conferir(textoBruto, registro) {
-  // Modelo pequeno as vezes escreve o proximo turno do usuario. Corta ali.
-  const texto = String(textoBruto || '')
-    .split(/\n\s*(?:Gabriel|Usuário|Usuario|User|Você|Voce)\s*:/)[0]
-    .trim();
-  const fezAlgo = registro.length > 0;
-  const deuCerto = registro.filter((r) => !/^Não |^Nao |^Ainda /.test(r.resultado));
-  const afirma = new RegExp(
-    '\\b(mud(ei|ando|ei para)|lig(uei|ando)|deslig(uei|ando)|aprov(ei|ando|ado)'
-    + '|refiz|refazendo|renderiz(ei|ando)|aplic(ei|ando)|coloc(quei|ando)'
-    + '|troc(quei|ando)|ajust(ei|ando)|atualiz(ei|ado|ando)|pronto)\\b', 'i')
-    .test(texto || '');
-
-  if (afirma && !deuCerto.length) {
-    const porque = fezAlgo
-      ? registro.map((r) => r.resultado).join(' ')
-      : 'não executei nenhuma ação';
-    return `${texto}\n\n⚠ Na verdade não mudei nada — ${porque} `
-      + 'Reformula o pedido, ou usa os botões da aba Estilo.';
-  }
-  if (deuCerto.length) {
-    return `${texto}\n\n${deuCerto.map((r) => `✓ ${r.resultado}`).join('\n')}`;
-  }
-  return texto;
-}
-
-/* ------------------------------------------------------------- conversa */
-
-export function situacao(projeto) {
-  const f1 = projeto.fase1 || {};
-  const e = projeto.estilo || {};
-  const clipes = (f1.clipes || []).filter((c) => c.ativo !== false);
-  return [
-    `Projeto: ${projeto.nome} (origem ${projeto.origem?.arquivo}, `
-      + `${projeto.origem?.duracao?.toFixed(0)}s de bruto)`,
-    `Fase 1: ${f1.status}, ${seg(f1.duracao || 0)}, ${clipes.length} clipes`,
-    `Beats: ${clipes.map((c, i) => `${i + 1}.${c.bloco}`).join(' ')}`,
-    `Clipes: ${clipes.map((c) => `${c.id}="${c.texto.slice(0, 40)}"`).join(' | ')}`,
-    `Descartados no corte: ${(f1.descartados || []).length}`,
-    `Estilo: edição ${e.tipoEdicao}, cor ${e.corDestaque}, headline ${e.estiloHeadline}, `
-      + `legenda ${e.estiloLegenda}`,
-    `Elementos ligados: ${Object.entries(e.elementos || {}).filter(([, v]) => v).map(([k]) => k).join(', ') || 'nenhum'}`,
-    `Fase 2: ${projeto.fase2?.status || 'nao-iniciada'}`,
-  ].join('\n');
-}
 
 export const SISTEMA = `Você é o Edvid, o assistente de um editor de vídeo que roda na máquina do Gabriel.
 
@@ -281,79 +69,182 @@ Regras:
 - Escreva só a sua resposta. Nunca escreva o próximo turno do Gabriel.
 - Não escreva linhas começando com ✓ ou ⚠ — o sistema põe essas sozinho.`;
 
-/**
- * Conversa com o modelo. Devolve { projeto, trabalhos } — `trabalhos` sao pedidos
- * para a fila (refazer/fase2) que o servidor enfileira depois.
- */
-export async function conversar(nome, texto) {
-  if (!temChave()) throw new Error('sem chave');
-  const chave = lerChave();
+/** Texto curto ("aprovar", "cor azul") nao precisa de esforco alto. */
+const RE_COMANDO_CURTO = /\b(aprov|refaz|render|cor|legenda|headline|liga|deslig|tira|clipe)\w*/i;
 
-  const projeto = carregar(nome);
-  if (!projeto) throw new Error('projeto nao encontrado');
+function escolherEsforco(texto) {
+  return texto.length < 60 && RE_COMANDO_CURTO.test(texto) ? 'low' : 'medium';
+}
 
-  if (!temCota(projeto)) throw new Error('sem cota');
-
-  vocediz(projeto, texto);
-  const trabalhos = [];
-  const registro = [];
-  // Sem chave explicita, o SDK resolve pelo perfil do `ant auth login`.
-  const cliente = chave ? new Anthropic({ apiKey: chave }) : new Anthropic();
-
-  // Só o histórico de texto entra; tabela e linha de ação são ruído para o modelo.
-  const historico = (projeto.conversa || [])
+/** Ultimas 20 mensagens de texto do chat, formatadas para o histórico. */
+function historicoTexto(projeto) {
+  return (projeto.conversa || [])
     .filter((m) => m.tipo === 'texto' && m.origem !== 'pipeline')
     .slice(-20)
     // Tira as anotacoes (✓ / ⚠) antes de devolver ao modelo: ele copia o
     // formato e passa a "confirmar" acao que nunca chamou.
-    .map((m) => ({
-      role: m.quem === 'voce' ? 'user' : 'assistant',
-      content: (m.texto || '').split(/\n\n[✓⚠]/)[0].trim(),
-    }))
-    .filter((m) => m.content);
+    .map((m) => `${m.quem === 'voce' ? 'Gabriel' : 'Edvid'}: ${(m.texto || '').split(/\n\n[✓⚠]/)[0].trim()}`)
+    .filter((l) => l.split(': ').slice(1).join(': '))
+    .join('\n');
+}
 
-  const mensagens = [
-    ...historico.slice(0, -1),
-    { role: 'user', content: `Situação agora:\n${situacao(projeto)}\n\nGabriel: ${texto}` },
-  ];
+/** Le o stream `text/event-stream` da ponte, chamando `aoParcial` a cada texto novo. */
+async function lerStream(response, aoParcial) {
+  const leitor = response.body.getReader();
+  const decodificador = new TextDecoder();
+  let sobra = '';
+  let acumulado = '';
+  let resultado = null;
+  let erro = null;
 
-  let resposta = await cliente.messages.create({
-    model: MODELO,
-    max_tokens: 8000,
-    system: SISTEMA,
-    tools: FERRAMENTAS,
-    output_config: { effort: 'low' },
-    messages: mensagens,
+  const processarBloco = (bloco) => {
+    let evento = 'message';
+    const linhasDado = [];
+    for (const linha of bloco.split('\n')) {
+      if (linha.startsWith('event:')) evento = linha.slice(6).trim();
+      else if (linha.startsWith('data:')) linhasDado.push(linha.slice(5).trim());
+    }
+    if (!linhasDado.length) return;
+    let dado;
+    try {
+      dado = JSON.parse(linhasDado.join('\n'));
+    } catch {
+      return;
+    }
+    if (evento === 'erro') { erro = dado; return; }
+    if (evento === 'fim' && dado?.rc) { erro = erro || dado; return; }
+
+    if (dado?.type === 'stream_event') {
+      const ev = dado.event || {};
+      if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+        acumulado += ev.delta.text || '';
+        aoParcial?.(acumulado);
+      }
+    } else if (dado?.type === 'result') {
+      resultado = dado;
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await leitor.read();
+    if (done) break;
+    sobra += decodificador.decode(value, { stream: true });
+    const blocos = sobra.split('\n\n');
+    sobra = blocos.pop();
+    for (const bloco of blocos) if (bloco.trim()) processarBloco(bloco);
+  }
+  if (sobra.trim()) processarBloco(sobra);
+
+  return { resultado, erro, acumulado };
+}
+
+async function chamarPonte({ sessao, sistema, mensagem, esforco, urlMcp, aoParcial }) {
+  const resposta = await fetch(`${PONTE_URL}/conversar`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      cliente: 'edvid',
+      sessao: sessao || null,
+      modelo: MODELO,
+      esforco,
+      sistema,
+      mensagem,
+      mcp: { edvid: { type: 'http', url: urlMcp } },
+      ferramentas_permitidas: ['mcp__edvid__*'],
+      max_voltas: 6,
+      timeout_s: 180,
+    }),
+    signal: AbortSignal.timeout(180000),
   });
+  if (!resposta.ok) throw new Error(`ponte respondeu ${resposta.status}`);
+  return lerStream(resposta, aoParcial);
+}
 
-  // Laço de ferramentas: executa o que ele pedir e devolve o resultado.
-  for (let volta = 0; volta < 6 && resposta.stop_reason === 'tool_use'; volta++) {
-    const usos = resposta.content.filter((b) => b.type === 'tool_use');
-    mensagens.push({ role: 'assistant', content: resposta.content });
-    mensagens.push({
-      role: 'user',
-      content: usos.map((u) => ({
-        type: 'tool_result',
-        tool_use_id: u.id,
-        content: executar(u.name, u.input || {}, projeto, trabalhos, registro),
-      })),
+/**
+ * Conversa com o modelo pela ponte. Devolve o projeto ja salvo — os
+ * `trabalhos` (refazer/fase2) sao enfileirados pela propria ferramenta MCP
+ * (mcp.js), nao aqui.
+ */
+export async function conversar(nome, texto, { aoParcial, urlMcp } = {}) {
+  const projeto = carregar(nome);
+  if (!projeto) throw new Error('projeto nao encontrado');
+  if (!temCota(projeto)) throw new Error('sem cota');
+
+  // O historico e o que ja estava na conversa antes desta mensagem — o
+  // `vocediz` logo abaixo empurra a mensagem atual, que ja vai explicita no
+  // fim de `mensagem`; incluir os dois duplicaria a fala do Gabriel. So
+  // entra quando nao ha sessao (o CLI guarda o historico sozinho); fica
+  // pronto tambem para a tentativa sem --resume, se a sessao for recusada.
+  const temSessao = Boolean(projeto.chat?.sessao);
+  const historico = historicoTexto(projeto);
+
+  vocediz(projeto, texto);
+
+  const sistema = `${SISTEMA}\n\nVocê tem ferramentas MCP; use-as para agir. O projeto atual `
+    + 'já está amarrado às ferramentas, não precisa passar o nome dele.';
+  const esforco = escolherEsforco(texto);
+  const urlEfetiva = urlMcp || `http://127.0.0.1:${PORTA_PREVIEW}/mcp/${encodeURIComponent(nome)}`;
+
+  const montarMensagem = () => (temSessao
+    ? `Situação agora:\n${situacao(projeto)}\n\nGabriel: ${texto}`
+    : `${historico}\n\nSituação agora:\n${situacao(projeto)}\n\nGabriel: ${texto}`.trim());
+
+  iniciarRegistro(nome);
+
+  let saida;
+  try {
+    saida = await chamarPonte({
+      sessao: projeto.chat?.sessao,
+      sistema,
+      mensagem: montarMensagem(),
+      esforco,
+      urlMcp: urlEfetiva,
+      aoParcial,
     });
-    resposta = await cliente.messages.create({
-      model: MODELO,
-      max_tokens: 8000,
-      system: SISTEMA,
-      tools: FERRAMENTAS,
-      output_config: { effort: 'low' },
-      messages: mensagens,
+  } catch (e) {
+    throw new Error(`ponte: ${e.message}`);
+  }
+
+  // Sessao recusada pelo CLI (ex: --resume de sessao que nao existe mais):
+  // zera e tenta uma unica vez de novo, sem --resume — com o historico
+  // completo, ja que o CLI nao tem mais o contexto guardado.
+  if (saida.erro && temSessao && /sess[aã]o/i.test(String(saida.erro?.stderr || saida.erro?.erro || ''))) {
+    projeto.chat = { ...projeto.chat, sessao: null };
+    iniciarRegistro(nome);
+    saida = await chamarPonte({
+      sessao: null,
+      sistema,
+      mensagem: `${historico}\n\nSituação agora:\n${situacao(projeto)}\n\nGabriel: ${texto}`.trim(),
+      esforco,
+      urlMcp: urlEfetiva,
+      aoParcial,
     });
   }
 
-  const texto_final = resposta.content
-    .filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-  if (texto_final || registro.length) diz(projeto, conferir(texto_final, registro));
+  if (saida.erro) {
+    throw new Error(saida.erro?.stderr || saida.erro?.erro || 'a ponte devolveu erro');
+  }
 
-  // So conta depois que a resposta veio: pedido que falhou nao gasta cota.
+  const dadosResultado = saida.resultado || {};
+  if (dadosResultado.is_error) {
+    throw new Error(dadosResultado.result || 'o modelo devolveu erro');
+  }
+
+  const textoFinal = (typeof dadosResultado.result === 'string' && dadosResultado.result)
+    || saida.acumulado || '';
+
+  if (dadosResultado.session_id) projeto.chat = { ...projeto.chat, sessao: dadosResultado.session_id };
   projeto.chat = { ...projeto.chat, usadas: (projeto.chat?.usadas || 0) + 1 };
+  const uso = dadosResultado.usage || {};
+  projeto.chat.ultimoUso = {
+    entrada: uso.input_tokens ?? uso.entrada ?? 0,
+    cache: uso.cache_read_input_tokens ?? uso.cache ?? 0,
+    saida: uso.output_tokens ?? uso.saida ?? 0,
+    custo: dadosResultado.total_cost_usd ?? 0,
+  };
+
+  diz(projeto, conferir(textoFinal, lerRegistro(nome)));
+
   const { restam } = cota(projeto);
   if (restam <= 3) {
     diz(projeto, restam === 0
@@ -363,5 +254,5 @@ export async function conversar(nome, texto) {
   }
 
   salvar(projeto);
-  return { projeto, trabalhos };
+  return { projeto, trabalhos: [] };
 }

@@ -1,7 +1,8 @@
 import { OLLAMA } from '../shared/config.js';
 import { carregar, salvar } from '../fase1/projeto.js';
 import { diz, vocediz } from '../shared/conversa.js';
-import { FERRAMENTAS, executar, situacao, SISTEMA, conferir } from './cerebro.js';
+import { FERRAMENTAS, executar, situacao, conferir } from './ferramentas.js';
+import { SISTEMA } from './cerebro.js';
 
 /**
  * Conversa usando um modelo que roda na propria maquina, via Ollama.

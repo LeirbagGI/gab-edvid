@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import { ffmpeg } from '../shared/exec.js';
-import { CORTE, SAIDA } from '../shared/config.js';
+import {
+  CORTE, SAIDA, CODEC, X264_PRESET, CRF,
+} from '../shared/config.js';
 
 /**
  * Monta o filter_complex que corta os clipes, normaliza para 1080x1920 e concatena.
@@ -37,11 +39,17 @@ export async function renderizarCorte(origem, clipes, destino, { onProgresso } =
   if (!clipes.length) throw new Error('Nenhum clipe para renderizar.');
   const filtro = montarFiltro(clipes);
 
+  // O Mac usa VideoToolbox (hardware); o container Linux nao tem, entao cai
+  // para libx264 por software, com preset e qualidade configuraveis por env.
+  const argsVideo = CODEC === 'libx264'
+    ? ['-c:v', 'libx264', '-preset', X264_PRESET, '-crf', String(CRF), '-pix_fmt', 'yuv420p']
+    : ['-c:v', CODEC, '-b:v', '12M'];
+
   await ffmpeg([
     '-i', origem,
     '-filter_complex', filtro,
     '-map', '[vout]', '-map', '[aout]',
-    '-c:v', 'h264_videotoolbox', '-b:v', '12M',
+    ...argsVideo,
     '-c:a', 'aac', '-b:a', '192k',
     '-movflags', '+faststart',
     destino,
@@ -60,6 +68,9 @@ export async function renderizarCorte(origem, clipes, destino, { onProgresso } =
 /**
  * Gera um filmstrip por clipe: varios frames lado a lado numa imagem so.
  * A timeline repete essa tira na horizontal, que e o visual de trilha de video.
+ *
+ * Um ffmpeg so por clipe (fps + scale + tile), sem frame temporario nenhum no
+ * disco — o hstack de varios spawns virou um filtro so.
  */
 export async function gerarMiniaturas(origem, clipes, pastaDestino) {
   const LARGURA_FRAME = 64;   // ~9:16 em 64x114
@@ -67,30 +78,15 @@ export async function gerarMiniaturas(origem, clipes, pastaDestino) {
 
   for (const c of clipes) {
     const arq = `${pastaDestino}/${c.id}.jpg`;
-    const quantos = Math.min(6, Math.max(1, Math.round(c.duracao / 1.2)));
-    const passo = c.duracao / quantos;
-    const partes = [];
+    const n = Math.min(6, Math.max(1, Math.round(c.duracao / 1.2)));
+    const fps = n / c.duracao;
 
-    for (let i = 0; i < quantos; i++) {
-      const t = c.origemInicio + passo * (i + 0.5);
-      const tmp = `${pastaDestino}/.${c.id}-${i}.jpg`;
-      await ffmpeg([
-        '-ss', String(t), '-i', origem, '-frames:v', '1',
-        '-vf', `scale=${LARGURA_FRAME}:-2`, tmp,
-      ]);
-      partes.push(tmp);
-    }
-
-    if (partes.length === 1) {
-      fs.renameSync(partes[0], arq);
-    } else {
-      await ffmpeg([
-        ...partes.flatMap((p) => ['-i', p]),
-        '-filter_complex', `hstack=inputs=${partes.length}`,
-        arq,
-      ]);
-      partes.forEach((p) => fs.unlinkSync(p));
-    }
+    await ffmpeg([
+      '-ss', String(c.origemInicio), '-t', String(c.duracao), '-i', origem,
+      '-vf', `fps=${fps},scale=${LARGURA_FRAME}:-2,tile=${n}x1`,
+      '-frames:v', '1',
+      arq,
+    ]);
     saidas.push(arq);
   }
   return saidas;

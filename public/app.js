@@ -31,6 +31,7 @@ const FONE = {
 /* ---------------------------------------------------------------- estado */
 let P = null;
 let ultimoAberto = null;
+let elParcial = null; // bolha do texto parcial do Claude, enquanto ele ainda esta pensando
 
 const fmt = (s) => {
   const m = Math.floor(s / 60);
@@ -704,6 +705,7 @@ ws.onmessage = (ev) => {
     $('#logMsg').textContent = m.msg || '';
     $('#logBarra').style.width = `${m.pct || 0}%`;
   }
+  if (m.tipo === 'chat-parcial' && m.nome === P?.nome) mostrarParcial(m.texto);
 };
 
 montarEstilo();
@@ -973,6 +975,7 @@ const FASE_ROTULO = {
 function desenharConversa() {
   const caixa = $('#conversa');
   const msgs = P?.conversa || [];
+  elParcial = null; // o innerHTML abaixo substitui tudo; a bolha parcial some com ele
   $('#chatProjeto').textContent = P?.nome || 'Edvid';
   $('#chatFase').textContent = FASE_ROTULO[P?.fase1?.status] || '';
 
@@ -986,12 +989,12 @@ function desenharConversa() {
   } else if (modoChat.modo === 'claude') {
     const usadas = P?.chat?.usadas || 0;
     const restam = Math.max(0, modoChat.limite - usadas);
-    dica.textContent = `claude opus 5 · ${restam}/${modoChat.limite} mensagens`;
+    dica.textContent = `fable 5.1 · ${restam}/${modoChat.limite} mensagens`;
     dica.style.cursor = 'pointer';
     dica.title = 'clique para liberar mais conversa neste projeto';
     dica.style.color = restam === 0 ? 'var(--rosa)' : '';
   } else {
-    dica.textContent = 'comandos fixos · sem chave da API';
+    dica.textContent = 'comandos fixos · sem ponte';
     dica.style.cursor = '';
     dica.title = '';
   }
@@ -1035,6 +1038,23 @@ function desenharConversa() {
 const destacarArquivos = (t = '') => t
   .replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
   .replace(/\b([\w-]+\.(?:mp4|mov|json|md|mp3|jpg|png))\b/g, '<span class="arq">$1</span>');
+
+/**
+ * Texto parcial do Claude chegando pelo WebSocket (`chat-parcial`), enquanto
+ * ele ainda esta pensando. Mostra/atualiza uma bolha no fim de #conversa;
+ * quando a resposta termina, `projeto` chega e `desenharConversa()` redesenha
+ * tudo — a bolha parcial some junto (ver `elParcial = null` la em cima).
+ */
+function mostrarParcial(texto) {
+  const caixa = $('#conversa');
+  if (!elParcial) {
+    elParcial = document.createElement('div');
+    elParcial.className = 'msg edvid parcial';
+    caixa.appendChild(elParcial);
+  }
+  elParcial.innerHTML = destacarArquivos(texto);
+  caixa.scrollTop = caixa.scrollHeight;
+}
 
 $('#chatForm').onsubmit = async (e) => {
   e.preventDefault();

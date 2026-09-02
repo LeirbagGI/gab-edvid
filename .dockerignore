@@ -1,0 +1,8 @@
+node_modules
+projetos
+models
+.remotion-bundle
+.git
+.env
+deploy
+*.md

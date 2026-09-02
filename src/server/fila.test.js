@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // A fila importa rodarFase1/rodarFase2 de verdade; aqui so exercitamos o
 // mecanismo (ordem, serialidade, erro que nao derruba o resto) com um tipo
 // falso injetado.
-const { fila } = await import('./fila.js');
+const { fila, Fila } = await import('./fila.js');
 
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -85,4 +88,84 @@ test('da para cancelar quem ainda esta na fila, mas nao quem ja roda', async () 
   assert.equal(fila.cancelar(fila.atual?.id ?? 'x'), false, 'nao pode cancelar o que ja roda');
   await esperar(150);
   restaurar();
+});
+
+// --------------------------------------------------------- persistencia
+
+/** Mesmo dublê de cima, mas instalado numa Fila nova (nao no singleton),
+ * apontando para um arquivo em os.tmpdir(). O executor nunca termina —
+ * so precisamos ver o estado gravado antes/depois do reinicio. */
+function comDubleEm(instancia, executar) {
+  instancia.puxar = async function puxar() {
+    if (this.rodando) return;
+    const item = this.itens.find((i) => i.status === 'na-fila');
+    if (!item) { this.atual = null; this.notificar(); return; }
+    this.rodando = true;
+    this.atual = item;
+    item.status = 'rodando';
+    this.notificar();
+    try {
+      await executar(item);
+      item.status = 'pronto';
+      item.pct = 100;
+    } catch (e) {
+      item.status = 'erro';
+      item.msg = e.message;
+    }
+    this.rodando = false;
+    this.atual = null;
+    this.notificar();
+    this.puxar();
+  };
+}
+
+const arquivoTemp = (sufixo) => path.join(os.tmpdir(), `edvid-fila-teste-${Date.now()}-${sufixo}.json`);
+const nuncaTermina = () => new Promise(() => {});
+
+test('persiste os itens da fila no arquivo antes de rodar', async () => {
+  const arquivo = arquivoTemp('a');
+  const f = new Fila({ arquivo });
+  comDubleEm(f, nuncaTermina);
+
+  f.enfileirar('fase1', { nome: 'x' });
+  f.enfileirar('fase1', { nome: 'y' });
+
+  const gravado = JSON.parse(fs.readFileSync(arquivo, 'utf8'));
+  const nomes = [gravado.atual, ...gravado.fila].filter(Boolean).map((i) => i.nome).sort();
+  assert.deepEqual(nomes, ['x', 'y']);
+
+  fs.unlinkSync(arquivo);
+});
+
+test('uma fila nova apontando para o mesmo arquivo recupera os itens na mesma ordem', async () => {
+  const arquivo = arquivoTemp('b');
+  const f1 = new Fila({ arquivo });
+  comDubleEm(f1, nuncaTermina);
+
+  f1.enfileirar('fase1', { nome: 'primeiro' });
+  f1.enfileirar('fase1', { nome: 'segundo' });
+
+  const f2 = new Fila({ arquivo });
+  assert.deepEqual(f2.itens.map((i) => i.nome), ['primeiro', 'segundo']);
+  assert.ok(f2.itens.every((i) => i.status === 'na-fila'), 'itens recuperados devem estar na-fila');
+  assert.equal(f2.rodando, false, 'construtor nao pode comecar a rodar sozinho');
+
+  fs.unlinkSync(arquivo);
+});
+
+test('o item que estava rodando volta na frente, marcado como retomado', async () => {
+  const arquivo = arquivoTemp('c');
+  const f1 = new Fila({ arquivo });
+  comDubleEm(f1, nuncaTermina);
+
+  f1.enfileirar('fase1', { nome: 'em-andamento' });
+  f1.enfileirar('fase1', { nome: 'espera' });
+
+  const f2 = new Fila({ arquivo });
+  assert.equal(f2.itens[0].nome, 'em-andamento');
+  assert.equal(f2.itens[0].status, 'na-fila');
+  assert.equal(f2.itens[0].msg, 'retomado depois de reinício');
+  assert.equal(f2.itens[1].nome, 'espera');
+
+  fs.unlinkSync(arquivo);
 });
