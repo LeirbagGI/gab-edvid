@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Edvid — Amostras de legenda (verificação D1)</title>
+<style>
+  /* Mesmas fontes de public/index.html — servidas daqui, e a razao de o
+     verificador visual do D1 rodar contra o servidor de verdade. */
+  @font-face{font-family:Montserrat;src:url(/fontes/Montserrat.ttf) format('truetype');
+    font-weight:100 900;font-display:swap}
+  @font-face{font-family:Poppins;src:url(/fontes/Poppins-Bold.ttf) format('truetype');
+    font-weight:700;font-display:swap}
+  @font-face{font-family:Poppins;src:url(/fontes/Poppins-ExtraBold.ttf) format('truetype');
+    font-weight:800;font-display:swap}
+  @font-face{font-family:Anton;src:url(/fontes/Anton.ttf) format('truetype');font-display:swap}
+  @font-face{font-family:"Bebas Neue";src:url(/fontes/BebasNeue.ttf) format('truetype');font-display:swap}
+  @font-face{font-family:"Archivo Black";src:url(/fontes/ArchivoBlack.ttf) format('truetype');font-display:swap}
+  @font-face{font-family:"Luckiest Guy";src:url(/fontes/LuckiestGuy.ttf) format('truetype');font-display:swap}
+  @font-face{font-family:Inter;src:url(/fontes/Inter.ttf) format('truetype');
+    font-weight:100 900;font-display:swap}
+  @font-face{font-family:"Playfair Display";src:url(/fontes/PlayfairDisplay-Italic.ttf) format('truetype');
+    font-style:italic;font-weight:400 900;font-display:swap}
+  @font-face{font-family:Fredoka;src:url(/fontes/Fredoka.ttf) format('truetype');
+    font-weight:300 700;font-display:swap}
+
+  *{box-sizing:border-box}
+  body{margin:0;background:#0a0f17;color:#eef2fa;
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    padding:1.6rem;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.9rem}
+  .card{background:#121a28;border:.14rem solid #24304a;border-radius:1.15rem;
+    padding:.7rem;text-align:center}
+  .card .id{font:800 .78rem/1 sans-serif;letter-spacing:.06em;color:#8494b0;margin-bottom:.6rem}
+  .amostra{background:#000;border-radius:.7rem;min-height:5.5rem;
+    display:grid;place-items:center;padding:.6rem;text-align:center;
+    font:.92rem/1.3 Inter,-apple-system,Helvetica,Arial,sans-serif}
+</style>
+</head>
+<body></body>
+<script type="module">
+  import { LEGENDAS } from '/shared/presets.js';
+  import { amostraLegenda } from '/amostra-legenda.js';
+
+  const cor = '#EE7533';
+  const body = document.body;
+  for (const p of LEGENDAS) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<div class="id">${p.id} · ${p.nome}</div>`
+      + `<div class="amostra" data-id="${p.id}"></div>`;
+    body.appendChild(card);
+  }
+  // Quadro fixo (mesmo t inicial que a aba Estilo pinta antes do primeiro
+  // requestAnimationFrame): mostra a terceira palavra ativa em toda amostra.
+  for (const p of LEGENDAS) {
+    document.querySelector(`[data-id="${p.id}"]`).innerHTML = amostraLegenda(p, 0.9, cor);
+  }
+</script>
+</html>

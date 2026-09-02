@@ -90,7 +90,7 @@ async function subirServidor() {
   };
 }
 
-test('lista as 8 ferramentas e chama mudar_estilo pelo MCP', async () => {
+test('lista as ferramentas e chama mudar_estilo pelo MCP', async () => {
   salvar(projetoMinimo());
 
   const { porta, transmitidos, fechar } = await subirServidor();
@@ -107,7 +107,7 @@ test('lista as 8 ferramentas e chama mudar_estilo pelo MCP', async () => {
       tools.map((t) => t.name).sort(),
       FERRAMENTAS.map((f) => f.name).sort(),
     );
-    assert.equal(tools.length, 8);
+    assert.equal(tools.length, FERRAMENTAS.length);
 
     const resultado = await client.callTool({
       name: 'mudar_estilo',

@@ -2,7 +2,8 @@ import {
   AbsoluteFill, OffthreadVideo, Audio, Img, staticFile,
   useCurrentFrame, useVideoConfig, interpolate, Easing,
 } from 'remotion';
-import { acharHeadline, acharLegenda } from '../src/shared/presets.js';
+import { acharHeadline } from '../src/shared/presets.js';
+import { Legenda } from './Legenda.jsx';
 
 /* ------------------------------------------------------------------ ajudas */
 
@@ -43,55 +44,6 @@ function deslocamento(clipe, progresso, ligado) {
     y: interpolate(progresso, [0, 1], [6, -6]),
   };
 }
-
-/* ------------------------------------------------------------------ legenda */
-
-function Legenda({ clipe, t, estilo, cor, altura }) {
-  const preset = acharLegenda(estilo.estiloLegenda);
-  if (preset.modo === 'nenhum' || !clipe?.palavras?.length) return null;
-
-  const base = preset.base(cor);
-  const ativo = preset.ativo(cor);
-  const corpo = Math.round(altura * 0.032 * (preset.escala || 1));
-
-  if (preset.modo === 'palavra') {
-    const p = clipe.palavras.find((w) => t >= w.inicio && t < w.fim);
-    if (!p) return null;
-    return (
-      <div style={{ ...caixaLegenda(altura), fontSize: corpo, ...base }}>{p.texto}</div>
-    );
-  }
-
-  // Modo frase: mostra uma janela de palavras e pinta a que esta soando.
-  // A mesma janela do preset alimenta a amostra animada da aba Estilo.
-  const idx = clipe.palavras.findIndex((w) => t >= w.inicio && t < w.fim);
-  if (idx < 0) return null;
-  const janela = preset.janela || 4;
-  const inicio = Math.floor(idx / janela) * janela;
-  const pedaco = clipe.palavras.slice(inicio, inicio + janela);
-
-  return (
-    <div style={{ ...caixaLegenda(altura), fontSize: corpo, ...base }}>
-      {pedaco.map((w, i) => {
-        const soando = t >= w.inicio && t < w.fim;
-        return (
-          <span key={`${w.inicio}-${i}`} style={soando ? ativo : undefined}>
-            {w.texto}{i < pedaco.length - 1 ? ' ' : ''}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-const caixaLegenda = (altura) => ({
-  position: 'absolute',
-  left: '8%', right: '8%',
-  bottom: altura * 0.17,
-  textAlign: 'center',
-  lineHeight: 1.25,
-  fontFamily: 'Inter, -apple-system, Helvetica, Arial, sans-serif',
-});
 
 /* ----------------------------------------------------------------- headline */
 

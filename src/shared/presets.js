@@ -6,11 +6,11 @@
  * e essa e a razao de o render ser em Remotion e nao em filtro de ffmpeg.
  */
 
-const contorno = (px = 3) => {
+const contorno = (px = 3, cor = '#000') => {
   const d = [];
   for (const x of [-px, 0, px]) {
     for (const y of [-px, 0, px]) {
-      if (x || y) d.push(`${x}px ${y}px 0 #000`);
+      if (x || y) d.push(`${x}px ${y}px 0 ${cor}`);
     }
   }
   return d.join(',');
@@ -77,7 +77,21 @@ export const HEADLINES = [
  * `janela` = quantas palavras aparecem juntas. `modo`:
  *   frase   — janela de palavras, a que esta soando ganha o estilo `ativo`
  *   palavra — uma palavra por vez, grandona
+ *   acumula — janela de palavras que vao surgindo conforme sao ditas; a que
+ *             ainda nao foi dita fica `visibility: hidden` (nao mexe no layout)
  *   nenhum  — sem legenda
+ *
+ * Campos opcionais, todos com default que reproduz o comportamento de antes:
+ *   passado(cor)    — estilo da palavra ja dita dentro da janela (default nenhum)
+ *   futuro(cor)     — estilo da palavra que ainda vai soar (default nenhum;
+ *                     ignorado no modo `acumula`, que usa `visibility: hidden`)
+ *   transformAtivo  — `transform` CSS so da palavra atual, ex. 'scale(1.12)'
+ *                     (aplica `display: inline-block` para o transform valer)
+ *   fundoLinha(cor) — estilo do container da linha inteira (faixa, bolha);
+ *                     vira um `inline-block` que huga so o texto
+ *   maiusculas      — true aplica `textTransform: uppercase` no container
+ *   posicao         — 'baixo' (default, bottom 17%) | 'meio' (centralizada) |
+ *                     'alto' (top 30%)
  */
 export const LEGENDAS = [
   {
@@ -169,6 +183,159 @@ export const LEGENDAS = [
     amostra: 'sem legenda',
     base: () => ({ color: '#6a7893', fontWeight: 400 }),
     ativo: () => ({}),
+  },
+
+  /* ------------------------------------------------------- 16 estilos novos */
+  {
+    id: 'neon', nome: 'Neon', modo: 'frase', janela: 3,
+    amostra: 'É assim que',
+    base: (cor) => ({
+      fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 800, color: '#fff',
+      textShadow: `0 0 .12em ${cor}, 0 0 .3em ${cor}, 0 0 .6em ${cor}`,
+    }),
+    ativo: (cor) => ({ color: cor, textShadow: '0 0 .12em #fff, 0 0 .3em #fff, 0 0 .6em #fff' }),
+  },
+  {
+    id: 'maquina', nome: 'Máquina de escrever', modo: 'acumula', janela: 5,
+    amostra: 'É assim que sua',
+    base: () => ({
+      fontFamily: 'Inter, -apple-system, sans-serif', fontWeight: 800,
+      color: '#fff', textShadow: '0 .12em .3em rgba(0,0,0,.85)',
+    }),
+    ativo: (cor) => ({ color: '#fff', borderRight: `.08em solid ${cor}` }),
+  },
+  {
+    id: 'pop', nome: 'Pop', modo: 'frase', janela: 3,
+    amostra: 'É assim que',
+    maiusculas: true,
+    base: () => ({
+      fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 900,
+      color: '#fff', textShadow: '0 .1em .3em rgba(0,0,0,.85)',
+    }),
+    transformAtivo: 'scale(1.18)',
+    ativo: (cor) => ({ color: cor, textShadow: contorno(3) }),
+  },
+  {
+    id: 'caixa-preta', nome: 'Caixa preta', modo: 'frase', janela: 4,
+    amostra: 'É assim que sua',
+    base: () => ({
+      fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 800,
+      color: '#fff', textShadow: contorno(3),
+    }),
+    ativo: (cor) => ({
+      color: cor, background: '#111', borderRadius: '.16em',
+      padding: '.02em .16em', boxDecorationBreak: 'clone',
+    }),
+  },
+  {
+    id: 'gradiente', nome: 'Gradiente', modo: 'frase', janela: 3,
+    amostra: 'É assim que',
+    base: (cor) => ({
+      fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 800,
+      backgroundImage: `linear-gradient(90deg, ${cor}, #fff)`,
+      WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
+    }),
+    ativo: () => ({ color: '#fff' }),
+  },
+  {
+    id: 'sublinhada', nome: 'Sublinhada', modo: 'frase', janela: 4,
+    amostra: 'É assim que sua',
+    base: () => ({
+      fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 800,
+      color: '#fff', textShadow: '0 .1em .3em rgba(0,0,0,.85)',
+    }),
+    ativo: (cor) => ({ borderBottom: `.12em solid ${cor}`, paddingBottom: '.02em' }),
+  },
+  {
+    id: 'sombra-dura', nome: 'Sombra dura', modo: 'frase', janela: 3,
+    amostra: 'É assim que',
+    maiusculas: true,
+    base: (cor) => ({
+      fontFamily: 'Anton, Impact, sans-serif', fontWeight: 400, color: '#fff',
+      textShadow: `.06em .06em 0 ${cor}, .12em .12em 0 #000`,
+    }),
+    ativo: (cor) => ({ color: cor, textShadow: '.06em .06em 0 #000' }),
+  },
+  {
+    id: 'hormozi', nome: 'Impacto', modo: 'frase', janela: 3,
+    amostra: 'É assim que',
+    maiusculas: true, escala: 1.25,
+    base: () => ({
+      fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 900,
+      color: '#F5C518', textShadow: contorno(4),
+    }),
+    transformAtivo: 'scale(1.1)',
+    ativo: () => ({ color: '#25C26E' }),
+  },
+  {
+    id: 'discreta', nome: 'Discreta', modo: 'frase', janela: 6,
+    amostra: 'É assim que sua legenda irá',
+    escala: 0.8, posicao: 'baixo',
+    base: () => ({
+      fontFamily: 'Inter, -apple-system, sans-serif', fontWeight: 500,
+      color: '#e6e9f0', textShadow: '0 .08em .2em rgba(0,0,0,.6)',
+    }),
+    ativo: () => ({}),
+  },
+  {
+    id: 'serif', nome: 'Editorial', modo: 'frase', janela: 3,
+    amostra: 'É assim que',
+    base: () => ({
+      fontFamily: '"Playfair Display", Georgia, serif', fontWeight: 700, fontStyle: 'italic',
+      color: '#fff', textShadow: '0 .1em .3em rgba(0,0,0,.85)',
+    }),
+    ativo: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'bolha', nome: 'Bolha', modo: 'frase', janela: 4,
+    amostra: 'É assim que sua',
+    base: () => ({ fontFamily: 'Fredoka, Poppins, sans-serif', fontWeight: 700, color: '#111' }),
+    fundoLinha: () => ({ background: '#fff', borderRadius: '.5em', padding: '.2em .5em' }),
+    ativo: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'fita', nome: 'Fita', modo: 'frase', janela: 4,
+    amostra: 'É assim que sua',
+    maiusculas: true, escala: 1.2,
+    base: () => ({ fontFamily: '"Bebas Neue", Anton, sans-serif', fontWeight: 400, color: '#fff' }),
+    fundoLinha: (cor) => ({ background: cor, padding: '.12em .4em' }),
+    ativo: () => ({ color: '#111' }),
+  },
+  {
+    id: 'glitch', nome: 'Glitch', modo: 'frase', janela: 3,
+    amostra: 'É assim que',
+    maiusculas: true,
+    base: () => ({
+      fontFamily: 'Anton, Impact, sans-serif', fontWeight: 400, color: '#fff',
+      textShadow: '-.04em 0 #38D6D2, .04em 0 #F73D9E',
+    }),
+    ativo: (cor) => ({ color: cor, textShadow: 'none' }),
+  },
+  {
+    id: 'duas-cores', nome: 'Duas cores', modo: 'frase', janela: 4,
+    amostra: 'É assim que sua',
+    maiusculas: true, escala: 1.15,
+    base: () => ({ fontFamily: '"Bebas Neue", Anton, sans-serif', fontWeight: 400, color: '#fff' }),
+    passado: () => ({ color: '#fff' }),
+    futuro: () => ({ color: '#8494b0' }),
+    ativo: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'esmaecida', nome: 'Esmaecida', modo: 'frase', janela: 5,
+    amostra: 'É assim que sua legenda',
+    base: () => ({ fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 700, color: '#fff' }),
+    passado: () => ({ opacity: .45 }),
+    futuro: () => ({ opacity: .75 }),
+    ativo: (cor) => ({ color: '#fff', opacity: 1, textShadow: contorno(2, cor) }),
+  },
+  {
+    id: 'contorno-cor', nome: 'Contorno na cor', modo: 'frase', janela: 3,
+    amostra: 'É assim que',
+    base: (cor) => ({
+      fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 800,
+      color: '#fff', textShadow: contorno(3, cor),
+    }),
+    ativo: (cor) => ({ color: cor, textShadow: contorno(3, '#fff') }),
   },
 ];
 

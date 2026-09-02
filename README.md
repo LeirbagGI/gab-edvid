@@ -217,12 +217,15 @@ guardadas em `public/fontes/`:
 
 | Fonte | Usada em |
 |---|---|
-| Montserrat | Karaokê, headline arredondada |
-| Poppins | Contorno, barra sólida, caixa branca |
-| Anton | Palavra única |
-| Bebas Neue | Condensada, headline caixa |
+| Montserrat | Karaokê, headline arredondada, Gradiente, Esmaecida, Pop, Impacto |
+| Poppins | Contorno, barra sólida, caixa branca, Neon, Caixa preta, Sublinhada, Contorno na cor |
+| Anton | Palavra única, Sombra dura, Glitch |
+| Bebas Neue | Condensada, headline caixa, Fita, Duas cores |
 | Archivo Black | reserva do Cartoon |
 | Luckiest Guy | Cartoon |
+| Inter | Simples, Máquina de escrever, Discreta |
+| Playfair Display | Editorial |
+| Fredoka | Bolha |
 
 Elas também estão instaladas em `~/Library/Fonts`. **Isso não é opcional**: o
 render do Remotion roda num Chrome headless que só encontra a família se ela

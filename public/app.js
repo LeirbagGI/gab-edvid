@@ -7,8 +7,9 @@ const CORES_BLOCO = { HOOK: '#f73d9e', DINAMICA: '#f97a1e', RECURSOS: '#38d6d2',
 const BLOCOS = Object.keys(CORES_BLOCO);
 
 import {
-  HEADLINES, LEGENDAS, TIPOS_EDICAO, ELEMENTOS, FRASE_AMOSTRA, cssDe,
+  HEADLINES, LEGENDAS, TIPOS_EDICAO, ELEMENTOS, cssDe,
 } from '/shared/presets.js';
+import { amostraLegenda, CICLO } from '/amostra-legenda.js';
 
 /* ---------------------------------------------------------------- presets */
 // Os mockups de celular de cada tipo de edicao. So isso e local: e ilustracao
@@ -498,38 +499,6 @@ function montarEstilo() {
  * palavra por palavra na janela do preset, a headline entra e sai. Um unico
  * requestAnimationFrame move todos, entao os cards ficam em sincronia.
  */
-const PALAVRAS_AMOSTRA = FRASE_AMOSTRA.split(' ');
-const POR_PALAVRA = 0.42;                                   // segundos por palavra
-const CICLO = PALAVRAS_AMOSTRA.length * POR_PALAVRA + 0.7;  // + respiro no fim
-
-function amostraLegenda(p, t, cor) {
-  // `escala` do preset multiplica o corpo, igual ao render.
-  const est = cssDe(p.base(cor)) + (p.escala ? `;font-size:${p.escala}em` : '');
-  if (p.modo === 'nenhum') return `<span style="${est}">${p.amostra}</span>`;
-
-  const i = Math.min(PALAVRAS_AMOSTRA.length - 1, Math.floor(t / POR_PALAVRA));
-  const ativo = cssDe(p.ativo(cor));
-
-  if (p.modo === 'palavra') {
-    return `<span style="${est}">${PALAVRAS_AMOSTRA[i]}</span>`;
-  }
-  const janela = p.janela || 3;
-  const de = Math.floor(i / janela) * janela;
-  const pedaco = PALAVRAS_AMOSTRA.slice(de, de + janela);
-  const linhas = p.linhas || 1;
-  const porLinha = Math.ceil(pedaco.length / linhas);
-
-  // O separador vem ANTES da palavra: assim a quebra de linha nunca engole o
-  // espaco entre as duas palavras vizinhas.
-  const html = pedaco.map((w, k) => {
-    const antes = k === 0 ? ''
-      : (linhas > 1 && k % porLinha === 0) ? '<br>' : ' ';
-    const soando = de + k === i;
-    return `${antes}<span style="${soando ? ativo : ''}">${w}</span>`;
-  }).join('');
-  return `<span style="${est}">${html}</span>`;
-}
-
 function amostraHeadline(p, t, cor) {
   // Entra em 0,35 s, segura o ciclo inteiro e sai nos ultimos 0,25 s — o mesmo
   // arco do render, sem deixar o card muito tempo em branco.

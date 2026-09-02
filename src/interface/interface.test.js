@@ -79,13 +79,19 @@ async function montarPagina() {
   Object.defineProperty(window.HTMLMediaElement.prototype, 'pause', { value() { } });
 
   const presets = fs.readFileSync(path.join(RAIZ, 'src', 'shared', 'presets.js'), 'utf8');
+  const amostraLegenda = fs.readFileSync(path.join(PUBLICO, 'amostra-legenda.js'), 'utf8');
   const app = fs.readFileSync(path.join(PUBLICO, 'app.js'), 'utf8');
-  // Junta os dois num script só, trocando o import pelo corpo do módulo.
-  const semExport = presets.replace(/^export /gm, '');
-  const semImport = app.replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/presets\.js';/m, '');
+  // Junta os tres num script só, trocando os imports pelo corpo dos módulos.
+  const semExportPresets = presets.replace(/^export /gm, '');
+  const semImportAmostra = amostraLegenda
+    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/presets\.js';/m, '')
+    .replace(/^export /gm, '');
+  const semImportApp = app
+    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/presets\.js';/m, '')
+    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/amostra-legenda\.js';/m, '');
 
   try {
-    window.eval(`${semExport}\n${semImport}`);
+    window.eval(`${semExportPresets}\n${semImportAmostra}\n${semImportApp}`);
   } catch (e) {
     erros.push(`erro ao carregar o app.js: ${e.message}`);
   }

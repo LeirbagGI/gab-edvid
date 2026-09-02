@@ -1,14 +1,27 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ffmpeg } from '../shared/exec.js';
 import {
   CORTE, SAIDA, CODEC, X264_PRESET, CRF,
 } from '../shared/config.js';
+import { corPadrao, montarFiltroCor } from '../shared/cor.js';
+
+// Raiz do codigo (codigo/), derivada do proprio arquivo — nao de config.js,
+// para nao mexer num arquivo de outra story ja entregue. Env `EDVID_LUTS`
+// sobrepoe, do jeito que a VPS vai fazer no container.
+const RAIZ_DO_CODIGO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const LUTS_DIR = process.env.EDVID_LUTS || path.join(RAIZ_DO_CODIGO, 'luts');
 
 /**
  * Monta o filter_complex que corta os clipes, normaliza para 1080x1920 e concatena.
  * O ganho do HOOK entra por clipe, antes do concat, para valer so no trecho certo.
+ * A cor (LUT + ajustes) entra uma vez so, depois do concat — mais barato que
+ * repetir por clipe, e o resultado e identico porque e um filtro por frame.
  */
-export function montarFiltro(clipes, { largura = SAIDA.largura, altura = SAIDA.altura, fps = SAIDA.fps } = {}) {
+export function montarFiltro(clipes, {
+  largura = SAIDA.largura, altura = SAIDA.altura, fps = SAIDA.fps, filtroCor = '',
+} = {}) {
   const partes = [];
   const rotulos = [];
 
@@ -30,14 +43,17 @@ export function montarFiltro(clipes, { largura = SAIDA.largura, altura = SAIDA.a
 
   partes.push(`${rotulos.join('')}concat=n=${clipes.length}:v=1:a=1[vout][aconcat]`);
   partes.push(`[aconcat]loudnorm=I=${CORTE.lufsAlvo}:TP=-1.5:LRA=11[aout]`);
+  if (filtroCor) partes.push(`[vout]${filtroCor}[vcor]`);
 
   return partes.join(';');
 }
 
 /** Renderiza o corte da Fase 1. Devolve o caminho do arquivo gerado. */
-export async function renderizarCorte(origem, clipes, destino, { onProgresso } = {}) {
+export async function renderizarCorte(origem, clipes, destino, { onProgresso, cor } = {}) {
   if (!clipes.length) throw new Error('Nenhum clipe para renderizar.');
-  const filtro = montarFiltro(clipes);
+  const filtroCor = montarFiltroCor(cor || corPadrao(), { pastaLuts: LUTS_DIR });
+  const filtro = montarFiltro(clipes, { filtroCor });
+  const rotuloVideo = filtroCor ? '[vcor]' : '[vout]';
 
   // O Mac usa VideoToolbox (hardware); o container Linux nao tem, entao cai
   // para libx264 por software, com preset e qualidade configuraveis por env.
@@ -48,7 +64,7 @@ export async function renderizarCorte(origem, clipes, destino, { onProgresso } =
   await ffmpeg([
     '-i', origem,
     '-filter_complex', filtro,
-    '-map', '[vout]', '-map', '[aout]',
+    '-map', rotuloVideo, '-map', '[aout]',
     ...argsVideo,
     '-c:a', 'aac', '-b:a', '192k',
     '-movflags', '+faststart',
@@ -63,6 +79,25 @@ export async function renderizarCorte(origem, clipes, destino, { onProgresso } =
   });
 
   return destino;
+}
+
+/**
+ * Um quadro so, com a cor aplicada (ou nao) — usado no antes/depois do
+ * preview de cor. `-ss` antes do `-i` para seek rapido, igual a gerarMiniaturas.
+ */
+export async function quadroComCor(origem, tempoS, cor, destinoJpg, { largura = 540 } = {}) {
+  const filtroCor = montarFiltroCor(cor || corPadrao(), { pastaLuts: LUTS_DIR });
+  const escala = `scale=${largura}:-2`;
+  const vf = filtroCor ? `${escala},${filtroCor}` : escala;
+
+  await ffmpeg([
+    '-ss', String(tempoS), '-i', origem,
+    '-frames:v', '1',
+    '-vf', vf,
+    destinoJpg,
+  ]);
+
+  return destinoJpg;
 }
 
 /**
