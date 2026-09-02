@@ -667,7 +667,7 @@ $('#btnFase2').onclick = async () => {
 };
 
 /* ---------------------------------------------------------------- ws */
-const ws = new WebSocket(`ws://${location.host}/ws`);
+const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.tipo === 'projeto' && m.projeto.nome === P?.nome) aplicar(m.projeto);
