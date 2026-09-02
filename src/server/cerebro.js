@@ -179,6 +179,10 @@ export async function conversar(nome, texto, { aoParcial, urlMcp } = {}) {
   const historico = historicoTexto(projeto);
 
   vocediz(projeto, texto);
+  // Grava ja: as ferramentas MCP rodam em outro fluxo e recarregam o projeto
+  // do disco; se a fala do Gabriel ficasse so em memoria, o `salvar` delas
+  // apagaria a mensagem, e o nosso `salvar` no fim apagaria o que elas fizeram.
+  salvar(projeto);
 
   const sistema = `${SISTEMA}\n\nVocê tem ferramentas MCP; use-as para agir. O projeto atual `
     + 'já está amarrado às ferramentas, não precisa passar o nome dele.';
@@ -232,6 +236,11 @@ export async function conversar(nome, texto, { aoParcial, urlMcp } = {}) {
 
   const textoFinal = (typeof dadosResultado.result === 'string' && dadosResultado.result)
     || saida.acumulado || '';
+
+  // Recarrega do disco: o que as ferramentas gravaram (aprovacao, cor, clipe,
+  // tabela na conversa) tem que sobreviver ao `salvar` daqui de baixo.
+  const fresco = carregar(nome);
+  if (fresco) Object.assign(projeto, fresco);
 
   if (dadosResultado.session_id) projeto.chat = { ...projeto.chat, sessao: dadosResultado.session_id };
   projeto.chat = { ...projeto.chat, usadas: (projeto.chat?.usadas || 0) + 1 };
