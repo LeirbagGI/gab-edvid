@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   agruparEmFalas, marcarDescartes, classificarBlocos, corteOrganico, marcarDestaques,
+  fundirCTA,
 } from './corte.js';
 
 /** Helper: monta palavras a partir de "texto@inicio-fim". */
@@ -154,4 +155,86 @@ test('fala longa sem pontuacao nem silencio ainda assim e quebrada', () => {
   assert.ok(falas.length >= 3, `24s num clipe so: veio ${falas.length} fala(s)`);
   assert.ok(falas.every((f) => f.fim - f.inicio <= 7.5),
     'nenhuma fala pode passar da trava de 7s');
+});
+
+// --- H4: corte organico nao pode picar frase boa em fragmento de <1s ---
+
+test('H4 (a): caso real da VPS - nao pica "existem tres erros que travam..." e funde o CTA num clipe so', () => {
+  // Palavras/tempos aproximados do caso medido em 02/09 (projeto palestra-teste,
+  // 22,8s). Gaps de 0,2 a 0,35s entre falas do mesmo periodo, como uma pausa de
+  // respiracao curta do TTS/whisper — e exatamente o que picava antes do H4.
+  let t = 0;
+  const falar = (palavras, gapDepois = 0) => {
+    for (const w of palavras) { p2.push(p(w, t, t + 0.3)); t += 0.3; }
+    t += gapDepois;
+  };
+  const p2 = [];
+
+  falar(['Se', 'voce', 'e', 'dono', 'de', 'empresa', 'e', 'sente', 'que', 'trabalha',
+    'demais', 'e', 'cresce', 'de', 'menos,'], 0.25);
+  falar(['presta', 'atencao', 'nisso.'], 0.6);
+  // A frase que picava: "Existem tres erros que" | "travam o faturamento..."
+  falar(['Existem', 'tres', 'erros', 'que'], 0.25);
+  falar(['travam', 'o', 'faturamento', 'de', 'quase', 'toda', 'empresa', 'pequena.'], 0.6);
+  falar(['O', 'primeiro', 'e', 'nao', 'ter', 'processo.'], 0.6);
+  falar(['O', 'segundo', 'e', 'depender', 'so', 'de', 'voce.'], 0.6);
+  falar(['O', 'terceiro', 'e', 'nao', 'medir', 'nada.'], 0.6);
+  // O CTA que virava quatro cortes secos de 0,6 a 1,2s.
+  falar(['Comenta', 'aqui'], 0.25);
+  falar(['qual', 'desses'], 0.2);
+  falar(['tres', 'e', 'o', 'seu,', 'que'], 0.3);
+  falar(['eu', 'te', 'respondo.']);
+
+  const r = corteOrganico(p2, t + 0.3);
+
+  const dinamica = r.clipes.find((c) => c.texto.includes('Existem tres erros'));
+  assert.ok(dinamica, 'clipe com "Existem tres erros" deveria existir');
+  assert.equal(dinamica.texto, 'Existem tres erros que travam o faturamento de quase toda empresa pequena.',
+    'a frase nao pode ficar picada em dois clipes');
+
+  const ctas = r.clipes.filter((c) => c.bloco === 'CTA');
+  assert.equal(ctas.length, 1, `CTA deveria virar um clipe so, veio ${ctas.length}`);
+  assert.equal(ctas[0].texto, 'Comenta aqui qual desses tres e o seu, que eu te respondo.');
+  assert.ok(ctas[0].duracao <= 7, 'CTA fundido nao pode passar de maxFala');
+});
+
+test('H4 (b): fragmento isolado por gap grande dos dois lados continua clipe proprio', () => {
+  const palavras = [
+    p('Tudo', 0, 0.4), p('bem', 0.4, 0.9), p('ate', 0.9, 1.1), p('aqui.', 1.1, 1.5),
+    // "Isso." isolado por 1,5s de silencio antes e depois — maior que gapFusaoS (0,35s).
+    p('Isso.', 3.0, 3.5),
+    p('Mas', 5.0, 5.3), p('depois', 5.3, 5.7), p('muda', 5.7, 6.1), p('tudo.', 6.1, 6.6),
+  ];
+  const r = corteOrganico(palavras, 7);
+  const isolado = r.clipes.find((c) => c.texto === 'Isso.');
+  assert.ok(isolado, 'o fragmento "Isso." deveria continuar como clipe proprio');
+});
+
+test('H4 (c): fala longa continua ainda quebra em 7s mesmo depois da fusao de clipe curto', () => {
+  const palavras = [];
+  for (let i = 0; i < 60; i++) palavras.push(p(`w${i}`, i * 0.4, i * 0.4 + 0.4));
+  const r = corteOrganico(palavras, 25);
+  assert.ok(r.clipes.length >= 3, `24s num clipe so: veio ${r.clipes.length} clipe(s)`);
+  assert.ok(r.clipes.every((c) => c.duracao <= 7.5),
+    'nenhum clipe pode passar da trava de 7s, nem depois da fusao');
+});
+
+test('H4 (d): fala terminando em conector ("que") nao fecha, mesmo com pausa real depois', () => {
+  const silencios = [{ inicio: 1.2, fim: 1.5 }];
+  const palavras = [
+    p('Existem', 0, 0.3), p('tres', 0.3, 0.6), p('erros', 0.6, 0.9), p('que', 0.9, 1.2),
+    p('travam', 1.5, 1.8), p('o', 1.8, 1.9), p('faturamento.', 1.9, 2.4),
+  ];
+  const falas = agruparEmFalas(palavras, { silencios });
+  assert.equal(falas.length, 1, 'nao deveria quebrar depois de "que"');
+  assert.equal(falas[0].texto, 'Existem tres erros que travam o faturamento.');
+});
+
+test('H4: fundirCTA nao funde se a soma passar de maxFala', () => {
+  const clipes = [
+    { inicio: 0, fim: 6, duracao: 6, texto: 'primeiro cta bem longo', bloco: 'CTA', palavras: [] },
+    { inicio: 6.1, fim: 8, duracao: 1.9, texto: 'segundo pedaco', bloco: 'CTA', palavras: [] },
+  ];
+  const fundidos = fundirCTA(clipes);
+  assert.equal(fundidos.length, 2, 'soma > 7s: nao deveria fundir');
 });

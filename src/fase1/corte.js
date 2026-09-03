@@ -1,8 +1,25 @@
 import { CORTE, BLOCOS } from '../shared/config.js';
 
+const NORMALIZAR_SIMPLES = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+// Palavras de ligacao: nunca fecham uma fala sozinhas, mesmo com pausa ou
+// virgula depois. "...que" no fim de um pedaco e frase cortada, nao fim de ideia.
+const CONECTORES = new Set([
+  'que', 'e', 'de', 'do', 'da', 'para', 'pra', 'com', 'sem', 'mas', 'ou',
+  'se', 'o', 'a', 'os', 'as', 'um', 'uma',
+]);
+
+const ehConector = (texto) => CONECTORES.has(NORMALIZAR_SIMPLES(texto).replace(/[^a-z]/g, ''));
+
 /**
  * Junta palavras em falas: quebra quando o intervalo entre uma palavra e a
  * proxima passa de pausaInternaMaxS, ou quando a palavra termina em pontuacao forte.
+ *
+ * Quebra "fraca" (silencio real detectado no audio, ou virgula/clausula) so
+ * vale se o pedaco que fica para tras ja fecha frase, ou tem 4+ palavras e um
+ * gap de verdade (>= silencioMinimoS); senao e meio de oracao e segue
+ * juntando ate maxFala. Isso e o que evita picar "existem tres erros que" /
+ * "travam o faturamento..." em dois clipes (H4).
  */
 export function agruparEmFalas(palavras, {
   pausaMax = CORTE.pausaInternaMaxS,
@@ -35,14 +52,29 @@ export function agruparEmFalas(palavras, {
     const fechouFrase = /[.!?]$/.test(anterior);
     const fechouClausula = /[,;:]$/.test(anterior);
     const duracaoAtual = atual.fim - atual.inicio;
+    const numPalavras = atual.palavras.length;
 
-    const quebrar = quebrasPorSilencio.has(i - 1)
-      || gap > pausaMax
-      || fechouFrase
-      || (fechouClausula && gap > 0.12)
+    // Quebra fraca: silencio real do audio, ou virgula/clausula com pausa.
+    // "Pausa curta demais" (gap > pausaMax) e trava de seguranca a parte,
+    // nao entra na regra de nao-picar-oracao — ela ja e um gap grande o
+    // bastante (0.45s+) para ser corte por si so.
+    const viaSilencioReal = quebrasPorSilencio.has(i - 1);
+    const viaClausula = fechouClausula && gap > 0.12;
+    const quebraFraca = viaSilencioReal || viaClausula;
+
+    // O gap efetivo da quebra fraca: silencio real ja passou pelo filtro de
+    // silencioMinimoS na deteccao (linha 17), entao conta como satisfeito.
+    const gapEfetivo = viaSilencioReal ? Math.max(gap, CORTE.silencioMinimoS) : gap;
+
+    const podeQuebrarPorOracao = fechouFrase
+      || (numPalavras >= 4 && gapEfetivo >= CORTE.silencioMinimoS);
+
+    const quebrar = fechouFrase
       // Trava de seguranca: fala sem pontuacao nem silencio nao pode virar
       // um bloco unico de minutos.
-      || duracaoAtual >= maxFala;
+      || duracaoAtual >= maxFala
+      || gap > pausaMax
+      || (quebraFraca && podeQuebrarPorOracao && !ehConector(anterior));
 
     if (quebrar) {
       falas.push(atual);
@@ -173,24 +205,88 @@ export function fecharBordas(falas, duracaoTotal) {
 }
 
 /**
- * Cola no vizinho apenas os fragmentos curtos demais para virar clipe proprio.
- * Falas com corpo continuam separadas — e assim que a timeline ganha ritmo.
+ * Cola no vizinho os clipes menores que clipeMinimoS (nenhum clipe ativo vira
+ * corte visual de menos de ~1,6s se puder ser evitado — H4). So funde com
+ * vizinho do mesmo periodo de fala (gap <= gapFusaoS) e escolhe sempre o de
+ * menor gap. Nunca passa de maxFala, a nao ser que a alternativa seja deixar
+ * um fragmento de menos de 0,8s sozinho.
  */
-export function fundirVizinhas(falas, { gapMax = 0.12, duracaoMinima = 0.55 } = {}) {
-  const saida = [];
-  for (const f of falas) {
-    const ult = saida.at(-1);
-    const fragmento = f.duracao < duracaoMinima || (ult && ult.duracao < duracaoMinima);
-    if (ult && fragmento && f.inicio - ult.fim <= gapMax) {
-      ult.fim = f.fim;
-      ult.duracao = ult.fim - ult.inicio;
-      ult.palavras.push(...f.palavras);
-      ult.texto = `${ult.texto} ${f.texto}`.trim();
-    } else {
-      saida.push({ ...f, palavras: [...f.palavras] });
+export function fundirVizinhas(falas, {
+  minimo = CORTE.clipeMinimoS,
+  gapMax = CORTE.gapFusaoS,
+  maxFala = 7,
+} = {}) {
+  const clipes = falas.map((f) => ({ ...f, palavras: [...f.palavras] }));
+
+  let mudou = true;
+  while (mudou) {
+    mudou = false;
+    for (let i = 0; i < clipes.length; i++) {
+      const c = clipes[i];
+      if (c.duracao >= minimo) continue;
+
+      const ant = clipes[i - 1];
+      const prox = clipes[i + 1];
+      const candidatos = [];
+      if (ant) candidatos.push({ lado: 'ant', gap: c.inicio - ant.fim, vizinho: ant });
+      if (prox) candidatos.push({ lado: 'prox', gap: prox.inicio - c.fim, vizinho: prox });
+      const elegiveis = candidatos.filter((cand) => cand.gap <= gapMax);
+      if (!elegiveis.length) continue;
+
+      elegiveis.sort((a, b) => a.gap - b.gap);
+      const escolhido = elegiveis[0];
+      const [esq, dir] = escolhido.lado === 'ant' ? [escolhido.vizinho, c] : [c, escolhido.vizinho];
+      const duracaoFundida = dir.fim - esq.inicio;
+
+      // Nunca cria clipe maior que maxFala, exceto quando a alternativa e
+      // deixar um fragmento < 0,8s sozinho: aí o fragmento perde.
+      if (duracaoFundida > maxFala && c.duracao >= 0.8) continue;
+
+      const fundido = {
+        ...esq,
+        fim: dir.fim,
+        duracao: duracaoFundida,
+        palavras: [...esq.palavras, ...dir.palavras],
+        texto: `${esq.texto} ${dir.texto}`.trim(),
+      };
+      const idxRemover = escolhido.lado === 'ant' ? i - 1 : i;
+      clipes.splice(idxRemover, 2, fundido);
+      mudou = true;
+      break;
     }
   }
-  return saida;
+  return clipes;
+}
+
+/**
+ * Um clipe por CTA quando cabe: se todos os clipes classificados como CTA
+ * somados nao passarem de maxFala e os gaps entre eles nao passarem de
+ * gapFusaoS, funde tudo num so. E o que evita quatro cortes secos de
+ * 0,6-1,2s no fechamento do reel (H4).
+ */
+export function fundirCTA(clipes, { maxFala = 7, gapMax = CORTE.gapFusaoS } = {}) {
+  const inicioCta = clipes.findIndex((c) => c.bloco === 'CTA');
+  if (inicioCta === -1) return clipes;
+
+  // Blocos sao monotonos (classificarBlocos garante): tudo a partir do
+  // primeiro CTA tambem e CTA.
+  const ctas = clipes.slice(inicioCta);
+  if (ctas.length <= 1) return clipes;
+
+  const duracaoTotal = ctas.reduce((s, c) => s + c.duracao, 0);
+  const gapsOk = ctas.every((c, i) => i === 0 || c.inicio - ctas[i - 1].fim <= gapMax);
+  if (duracaoTotal > maxFala || !gapsOk) return clipes;
+
+  const primeiro = ctas[0];
+  const ultimo = ctas.at(-1);
+  const fundido = {
+    ...primeiro,
+    fim: ultimo.fim,
+    duracao: ultimo.fim - primeiro.inicio,
+    palavras: ctas.flatMap((c) => c.palavras),
+    texto: ctas.map((c) => c.texto).join(' ').trim(),
+  };
+  return [...clipes.slice(0, inicioCta), fundido];
 }
 
 /**
@@ -245,7 +341,8 @@ export function corteOrganico(palavras, duracaoTotal, silencios = []) {
   const marcadas = marcarDescartes(falas);
   const fechadas = fecharBordas(marcadas, duracaoTotal);
   const fundidas = fundirVizinhas(fechadas);
-  const clipes = classificarBlocos(fundidas);
+  const classificados = classificarBlocos(fundidas);
+  const clipes = fundirCTA(classificados);
 
   return {
     clipes: clipes.map((c, i) => ({
