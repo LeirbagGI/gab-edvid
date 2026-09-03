@@ -107,6 +107,18 @@ export async function refazerCorte(nome, { log = () => {} } = {}) {
   projeto.fase1.renderizadoEm = new Date().toISOString();
 
   // Reposiciona os clipes ativos na linha do tempo nova.
+  //
+  // IMPORTANTE (API-2, edicao de legenda): `c.palavras` aqui e SEMPRE a que
+  // ja estava salva no projeto.json antes deste refazer — a funcao nunca
+  // re-deriva palavras de uma transcricao bruta, so desloca no tempo as que
+  // ja existem. Por isso `texto`, `oculta` e `destaque` (as edicoes feitas
+  // por editar_palavra/dividir/juntar/empurrar) sobrevivem sozinhas, por
+  // indice, sempre que o clipe nao mudou de `origemInicio`/`origemFim` desde
+  // a ultima vez que foi cortado — que e o caso de todo clipe que so foi
+  // ligado/desligado ou teve o bloco trocado. Escrito explicito (nomeando os
+  // campos, em vez de confiar soh no spread) para essa garantia nao se
+  // perder se um dia esta funcao passar a re-cortar palavras a partir do
+  // audio bruto quando origemInicio/origemFim mudarem.
   let t = 0;
   const mantidos = ativos.map((c) => {
     // As palavras ja estao na linha do tempo do corte anterior, nao na origem.
@@ -117,6 +129,9 @@ export async function refazerCorte(nome, { log = () => {} } = {}) {
       fim: Number((t + c.duracao).toFixed(3)),
       palavras: c.palavras.map((p) => ({
         ...p,
+        texto: p.texto,
+        oculta: p.oculta,
+        destaque: p.destaque,
         inicio: Number((p.inicio + desloc).toFixed(3)),
         fim: Number((p.fim + desloc).toFixed(3)),
       })),

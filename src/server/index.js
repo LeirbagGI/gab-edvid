@@ -5,13 +5,19 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import multer from 'multer';
 import { WebSocketServer } from 'ws';
-import { PORTA_PREVIEW, PROJETOS, PASTA_ENTRADA, RE_VIDEO, EXTENSOES, OLLAMA } from '../shared/config.js';
+import { PORTA_PREVIEW, PROJETOS, PASTA_ENTRADA, RE_VIDEO, EXTENSOES, OLLAMA, SAIDA } from '../shared/config.js';
 import { carregar, salvar, listar, caminhoProjeto, nomeLivre } from '../fase1/projeto.js';
 import { quadroComCor } from '../fase1/render.js';
 import { headlinePadrao, lerBroll, lerTrilha } from '../fase2/render.js';
 import { diz } from '../shared/conversa.js';
 import { LUTS, corPadrao, validarCor } from '../shared/cor.js';
 import { gerarPreview } from '../shared/preview.js';
+import { TRANSICOES, ANIMACOES_INTRO, INTRO_PADRAO, acharTransicao } from '../shared/efeitos.js';
+import { gerarSrt, gerarAss } from '../shared/legenda-export.js';
+import {
+  editarPalavra, dividirPalavra, juntarPalavra, empurrarPalavra, validarConfigLegenda,
+} from './legenda-edicao.js';
+import { ffprobe } from '../shared/exec.js';
 import { fila } from './fila.js';
 import { interpretar } from './comandos.js';
 import { conversar, temPonte, cota, temCota, MODELO } from './cerebro.js';
@@ -137,12 +143,99 @@ app.delete('/api/projeto/:nome', (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------------------------------------- validacao (transicao/efeitos) */
+
+/** `{ tipo, duracao? } | null` — usado tanto em `estilo.transicao` quanto por clipe. */
+function validarTransicaoPatch(t) {
+  if (t === null || t === undefined) return [];
+  if (typeof t !== 'object' || Array.isArray(t)) return ['transicao precisa ser um objeto ou null'];
+  const erros = [];
+  if (!t.tipo || !TRANSICOES.some((x) => x.id === t.tipo)) erros.push(`transicao.tipo invalida: "${t.tipo}"`);
+  if (t.duracao !== undefined && (typeof t.duracao !== 'number' || t.duracao < 0)) {
+    erros.push('transicao.duracao precisa ser numero >= 0');
+  }
+  return erros;
+}
+
+/** `estilo.efeitos` do projeto: grao/vinheta/shake 0..1, blurFundo/letterbox booleanos, barraProgresso. */
+function validarEfeitosProjetoPatch(e) {
+  if (e === null || e === undefined) return [];
+  if (typeof e !== 'object' || Array.isArray(e)) return ['efeitos precisa ser um objeto ou null'];
+  const erros = [];
+  for (const chave of ['grao', 'vinheta', 'shake']) {
+    if (e[chave] !== undefined && (typeof e[chave] !== 'number' || e[chave] < 0 || e[chave] > 1)) {
+      erros.push(`efeitos.${chave} precisa estar entre 0 e 1`);
+    }
+  }
+  if (e.blurFundo !== undefined && typeof e.blurFundo !== 'boolean') erros.push('efeitos.blurFundo precisa ser booleano');
+  if (e.letterbox !== undefined && typeof e.letterbox !== 'boolean') erros.push('efeitos.letterbox precisa ser booleano');
+  if (Object.prototype.hasOwnProperty.call(e, 'barraProgresso') && e.barraProgresso !== null) {
+    if (typeof e.barraProgresso !== 'object' || !['topo', 'base'].includes(e.barraProgresso.posicao)) {
+      erros.push('efeitos.barraProgresso precisa ser { posicao: "topo"|"base" } ou null');
+    }
+  }
+  return erros;
+}
+
+/** `fase1.clipes[].efeitos`: mesmo grao/vinheta/shake, mais `congelar` (segundos, 0..5). */
+function validarEfeitosClipePatch(e) {
+  if (e === null || e === undefined) return [];
+  if (typeof e !== 'object' || Array.isArray(e)) return ['efeitos precisa ser um objeto ou null'];
+  const erros = [];
+  for (const chave of ['grao', 'vinheta', 'shake']) {
+    if (e[chave] !== undefined && (typeof e[chave] !== 'number' || e[chave] < 0 || e[chave] > 1)) {
+      erros.push(`efeitos.${chave} precisa estar entre 0 e 1`);
+    }
+  }
+  if (e.congelar !== undefined && (typeof e.congelar !== 'number' || e.congelar < 0 || e.congelar > 5)) {
+    erros.push('efeitos.congelar precisa estar entre 0 e 5');
+  }
+  return erros;
+}
+
 /* ------------------------------------------------------------- fase 1 */
 
 app.put('/api/projeto/:nome/estilo', (req, res) => {
   const p = carregar(req.params.nome);
   if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
-  p.estilo = { ...p.estilo, ...req.body };
+
+  const corpo = req.body || {};
+  const temTransicao = Object.prototype.hasOwnProperty.call(corpo, 'transicao');
+  const temEfeitos = Object.prototype.hasOwnProperty.call(corpo, 'efeitos');
+  const erros = [
+    ...(temTransicao ? validarTransicaoPatch(corpo.transicao) : []),
+    ...(temEfeitos ? validarEfeitosProjetoPatch(corpo.efeitos) : []),
+  ];
+  if (erros.length) return res.status(400).json({ erro: erros.join('; ') });
+
+  // Campos simples (tipoEdicao, corDestaque, estiloHeadline, estiloLegenda,
+  // observacoes...) entram por merge raso, como sempre; elementos/efeitos/
+  // transicao mesclam campo a campo, sem apagar o que nao veio no pedido.
+  const { transicao, efeitos, elementos, ...simples } = corpo;
+  p.estilo = { ...p.estilo, ...simples };
+  if (elementos) p.estilo.elementos = { ...(p.estilo.elementos || {}), ...elementos };
+  if (temEfeitos) {
+    if (efeitos === null) delete p.estilo.efeitos;
+    else p.estilo.efeitos = { ...(p.estilo.efeitos || {}), ...efeitos };
+  }
+  if (temTransicao) {
+    if (transicao === null) delete p.estilo.transicao;
+    else p.estilo.transicao = { ...(p.estilo.transicao || {}), ...transicao };
+  }
+
+  // Coerencia entre elementos.flashNaTransicao e transicao.tipo === 'flash', nos dois sentidos.
+  if (transicao?.tipo) {
+    p.estilo.elementos = { ...(p.estilo.elementos || {}), flashNaTransicao: transicao.tipo === 'flash' };
+  } else if (elementos && Object.prototype.hasOwnProperty.call(elementos, 'flashNaTransicao')) {
+    if (elementos.flashNaTransicao) {
+      p.estilo.transicao = {
+        ...(p.estilo.transicao || {}), tipo: 'flash', duracao: p.estilo.transicao?.duracao ?? acharTransicao('flash').duracao,
+      };
+    } else if (p.estilo.transicao?.tipo === 'flash') {
+      p.estilo.transicao = { tipo: 'corte', duracao: acharTransicao('corte').duracao };
+    }
+  }
+
   salvar(p);
   transmitir({ tipo: 'projeto', projeto: p });
   res.json(p.estilo);
@@ -172,12 +265,33 @@ app.patch('/api/projeto/:nome/clipe/:id', (req, res) => {
   if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
   const c = p.fase1.clipes.find((x) => x.id === req.params.id);
   if (!c) return res.status(404).json({ erro: 'clipe nao encontrado' });
-  const { bloco, ativo, origemInicio, origemFim } = req.body;
+
+  const {
+    bloco, ativo, origemInicio, origemFim, transicao, efeitos,
+  } = req.body;
+  const temTransicao = Object.prototype.hasOwnProperty.call(req.body, 'transicao');
+  const temEfeitos = Object.prototype.hasOwnProperty.call(req.body, 'efeitos');
+  const erros = [
+    ...(temTransicao ? validarTransicaoPatch(transicao) : []),
+    ...(temEfeitos ? validarEfeitosClipePatch(efeitos) : []),
+  ];
+  if (erros.length) return res.status(400).json({ erro: erros.join('; ') });
+
   if (bloco) { c.bloco = bloco; c.blocoManual = true; }
   if (typeof ativo === 'boolean') c.ativo = ativo;
   if (typeof origemInicio === 'number') c.origemInicio = origemInicio;
   if (typeof origemFim === 'number') c.origemFim = origemFim;
   c.duracao = Number((c.origemFim - c.origemInicio).toFixed(3));
+
+  if (temTransicao) {
+    if (transicao === null) delete c.transicao;
+    else c.transicao = { tipo: transicao.tipo, ...(transicao.duracao !== undefined ? { duracao: transicao.duracao } : {}) };
+  }
+  if (temEfeitos) {
+    if (efeitos === null) delete c.efeitos;
+    else c.efeitos = { ...(c.efeitos || {}), ...efeitos };
+  }
+
   p.fase1.status = 'editado';
   salvar(p);
   transmitir({ tipo: 'projeto', projeto: p });
@@ -262,6 +376,182 @@ app.put('/api/projeto/:nome/fase2', (req, res) => {
   salvar(p);
   transmitir({ tipo: 'projeto', projeto: p });
   res.json(p.fase2);
+});
+
+/* ------------------------------------------------------------- intro (Epico E) */
+
+const RE_INTRO = /\.(png|jpe?g|webp|mp4|mov|webm|m4v)$/i;
+const EXT_VIDEO_INTRO = new Set(['mp4', 'mov', 'webm', 'm4v']);
+
+const uploadIntro = multer({
+  storage: multer.diskStorage({
+    destination: (req, _f, cb) => {
+      const destino = path.join(caminhoProjeto(req.params.nome), 'intro');
+      fs.mkdirSync(destino, { recursive: true });
+      cb(null, destino);
+    },
+    filename: (_r, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const base = path.basename(file.originalname, ext)
+        .replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'capa';
+      cb(null, `${base}${ext}`);
+    },
+  }),
+  limits: { fileSize: 300 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, RE_INTRO.test(file.originalname)),
+});
+
+app.post('/api/projeto/:nome/intro', uploadIntro.single('arquivo'), async (req, res) => {
+  try {
+    const p = carregar(req.params.nome);
+    if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+    if (!req.file) return res.status(400).json({ erro: 'nenhum arquivo (campo "arquivo", imagem ou video)' });
+
+    const pasta = caminhoProjeto(p.nome);
+    const ext = path.extname(req.file.path).replace('.', '').toLowerCase();
+    const ehVideo = EXT_VIDEO_INTRO.has(ext);
+
+    let duracao = INTRO_PADRAO.duracao;
+    if (ehVideo) {
+      const info = await ffprobe(req.file.path);
+      duracao = info.duracao;
+    } else if (req.body.duracao !== undefined && Number.isFinite(Number(req.body.duracao)) && Number(req.body.duracao) > 0) {
+      duracao = Number(req.body.duracao);
+    }
+
+    p.intro = {
+      arquivo: path.relative(pasta, req.file.path),
+      tipo: ehVideo ? 'video' : 'imagem',
+      duracao: Number(duracao.toFixed(3)),
+    };
+    if (!ehVideo) {
+      p.intro.animacao = ANIMACOES_INTRO.includes(req.body.animacao) ? req.body.animacao : INTRO_PADRAO.animacao;
+    }
+    if (req.body.headline !== undefined) p.intro.headline = req.body.headline === 'true' || req.body.headline === true;
+
+    salvar(p);
+    transmitir({ tipo: 'projeto', projeto: p });
+    res.json(p.intro);
+  } catch (e) {
+    res.status(400).json({ erro: e.message });
+  }
+});
+
+app.put('/api/projeto/:nome/intro', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+  if (!p.intro) return res.status(400).json({ erro: 'projeto sem intro' });
+
+  const { duracao, animacao, headline } = req.body || {};
+  if (typeof duracao === 'number') p.intro.duracao = duracao;
+  if (animacao !== undefined) {
+    if (!ANIMACOES_INTRO.includes(animacao)) return res.status(400).json({ erro: `animacao invalida: "${animacao}"` });
+    p.intro.animacao = animacao;
+  }
+  if (typeof headline === 'boolean') p.intro.headline = headline;
+
+  salvar(p);
+  transmitir({ tipo: 'projeto', projeto: p });
+  res.json(p.intro);
+});
+
+app.delete('/api/projeto/:nome/intro', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+  if (p.intro?.arquivo) fs.rmSync(path.join(caminhoProjeto(p.nome), p.intro.arquivo), { force: true });
+  delete p.intro;
+  salvar(p);
+  transmitir({ tipo: 'projeto', projeto: p });
+  res.json({ ok: true });
+});
+
+/* ------------------------------------------------------------- legenda (Epico D) */
+
+app.put('/api/projeto/:nome/legenda', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+
+  const corpo = req.body || {};
+  const erros = validarConfigLegenda(corpo);
+  if (erros.length) return res.status(400).json({ erro: erros.join('; ') });
+
+  p.estilo = p.estilo || {};
+  p.estilo.legenda = { ...(p.estilo.legenda || {}), ...corpo };
+  salvar(p);
+  transmitir({ tipo: 'projeto', projeto: p });
+  res.json(p.estilo.legenda);
+});
+
+// Edicao de legenda: mexe direto em fase1.clipes[].palavras (logica pura em
+// legenda-edicao.js) — cada rota carrega, chama, salva e transmite.
+app.patch('/api/projeto/:nome/palavras', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+  try {
+    const palavra = editarPalavra(p.fase1?.clipes || [], req.body || {});
+    salvar(p);
+    transmitir({ tipo: 'projeto', projeto: p });
+    res.json({ palavra });
+  } catch (e) {
+    res.status(400).json({ erro: e.message });
+  }
+});
+
+app.post('/api/projeto/:nome/palavras/dividir', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+  try {
+    const palavras = dividirPalavra(p.fase1?.clipes || [], req.body || {});
+    salvar(p);
+    transmitir({ tipo: 'projeto', projeto: p });
+    res.json({ palavras });
+  } catch (e) {
+    res.status(400).json({ erro: e.message });
+  }
+});
+
+app.post('/api/projeto/:nome/palavras/juntar', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+  try {
+    const palavra = juntarPalavra(p.fase1?.clipes || [], req.body || {});
+    salvar(p);
+    transmitir({ tipo: 'projeto', projeto: p });
+    res.json({ palavra });
+  } catch (e) {
+    res.status(400).json({ erro: e.message });
+  }
+});
+
+app.post('/api/projeto/:nome/palavras/empurrar', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+  try {
+    const palavras = empurrarPalavra(p.fase1?.clipes || [], req.body || {});
+    salvar(p);
+    transmitir({ tipo: 'projeto', projeto: p });
+    res.json({ palavras });
+  } catch (e) {
+    res.status(400).json({ erro: e.message });
+  }
+});
+
+// Exportacao (src/shared/legenda-export.js, puro): SRT por bloco do motor,
+// ASS com karaoke `\k` por palavra. Nao grava nada em disco, so devolve.
+app.get('/api/projeto/:nome/legenda.srt', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+  const srt = gerarSrt(p.fase1?.clipes || [], p.estilo || {});
+  res.set('Content-Disposition', `attachment; filename="${p.nome}.srt"`);
+  res.type('text/plain; charset=utf-8').send(srt);
+});
+
+app.get('/api/projeto/:nome/legenda.ass', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+  const ass = gerarAss(p.fase1?.clipes || [], p.estilo || {}, p.saida || SAIDA);
+  res.set('Content-Disposition', `attachment; filename="${p.nome}.ass"`);
+  res.type('text/plain; charset=utf-8').send(ass);
 });
 
 /* ------------------------------------------------------------- chat */

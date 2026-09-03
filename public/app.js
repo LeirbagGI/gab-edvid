@@ -10,6 +10,10 @@ import {
   HEADLINES, LEGENDAS, TIPOS_EDICAO, ELEMENTOS, cssDe,
 } from '/shared/presets.js';
 import { amostraLegenda, CICLO } from '/amostra-legenda.js';
+import {
+  TRANSICOES, EFEITOS, INTRO_PADRAO, ANIMACOES_INTRO, transicaoPadrao,
+} from '/shared/efeitos.js';
+import { montarCor, aplicarCor } from '/cor.js';
 
 /* ---------------------------------------------------------------- presets */
 // Os mockups de celular de cada tipo de edicao. So isso e local: e ilustracao
@@ -51,6 +55,14 @@ $$('.abas button, .btProjetos').forEach((b) => {
     if (b.dataset.aba === 'estilo') desenharAmostras((performance.now() / 1000) % CICLO);
   };
 });
+
+// Util para verificacao visual e para o usuario: ?aba=estilo abre direto
+// naquela aba no carregamento (a Fase 1 abre por padrao, sem clique).
+const abaNaUrl = new URLSearchParams(location.search).get('aba');
+if (abaNaUrl) {
+  const botao = $$('.abas button, .btProjetos').find((b) => b.dataset.aba === abaNaUrl);
+  if (botao) botao.click();
+}
 
 /* ---------------------------------------------------------------- carregar */
 async function listarProjetos() {
@@ -126,6 +138,7 @@ function aplicar(projeto) {
   desenharTimeline();
   desenharRemovidos();
   aplicarEstilo();
+  aplicarCor(P);
   aplicarFase2();
   desenharConversa();
 }
@@ -135,7 +148,9 @@ function aplicar(projeto) {
  * Uma fabrica, duas instancias: a Fase 1 desenha o corte e a Fase 2 desenha o
  * video final. Sem isso as duas timelines iam divergir com o tempo.
  */
-function criarTimeline({ sufixo, video, dados, aoSelecionar }) {
+function criarTimeline({
+  sufixo, video, dados, aoSelecionar, comTransicoes = false,
+}) {
   const q = (id) => $(`#${id}${sufixo}`);
   const player = $(`#${video}`);
   let pxPorSeg = 52;
@@ -191,6 +206,24 @@ function criarTimeline({ sufixo, video, dados, aoSelecionar }) {
           n.appendChild(alca);
         }
       });
+    }
+
+    // Marcador de transição na borda entre um clipe e o seguinte: n clipes
+    // ativos e contíguos dão n-1 marcadores. Só a Fase 1 edita isso — a
+    // Fase 2 só assiste o resultado.
+    if (comTransicoes) {
+      for (let i = 0; i < d.clipes.length - 1; i++) {
+        const alvo = d.clipes[i + 1];
+        const marca = document.createElement('i');
+        marca.className = `marcaTransicao${alvo.transicao ? ' on' : ''}`;
+        marca.dataset.clipe = alvo.id;
+        marca.style.left = `${alvo.inicio * pxPorSeg}px`;
+        marca.title = alvo.transicao
+          ? `entrada de ${alvo.id}: ${(TRANSICOES.find((t) => t.id === alvo.transicao.tipo) || {}).nome || alvo.transicao.tipo}`
+          : 'entrada usa a transição do projeto';
+        marca.onclick = (e) => { e.stopPropagation(); abrirPopoverTransicao(marca, alvo.id); };
+        el.clipes.appendChild(marca);
+      }
     }
 
     const picos = d.picos || [];
@@ -351,7 +384,7 @@ function criarTimeline({ sufixo, video, dados, aoSelecionar }) {
 let clipeSel = null;
 
 const tlCorte = criarTimeline({
-  sufixo: '', video: 'player',
+  sufixo: '', video: 'player', comTransicoes: true,
   dados: () => (P?.fase1?.clipes?.length ? {
     duracao: P.fase1.duracao,
     clipes: P.fase1.clipes.filter((c) => c.ativo !== false),
@@ -360,6 +393,39 @@ const tlCorte = criarTimeline({
   } : null),
   aoSelecionar: (id) => { clipeSel = id; tlCorte.desenhar(); desenharFicha(); },
 });
+
+/* ------------------------------------------------ popover de transição */
+/*
+ * Um popover só, reaproveitado por qualquer marcador clicado — mais simples
+ * do que um por marcador, e evita ficar pendurado quando desenhar() redesenha
+ * a trilha (o popover mora em document.body, fora de #trilhaClipes).
+ */
+let popTransicao = null;
+function fecharPopoverTransicao() {
+  popTransicao?.remove();
+  popTransicao = null;
+}
+function abrirPopoverTransicao(marcaEl, clipeId) {
+  fecharPopoverTransicao();
+  const pop = document.createElement('div');
+  pop.className = 'popTransicao';
+  pop.innerHTML = `<button data-t="">Usar a do projeto</button>${
+    TRANSICOES.map((t) => `<button data-t="${t.id}">${t.nome}</button>`).join('')}`;
+  document.body.appendChild(pop);
+  const r = marcaEl.getBoundingClientRect();
+  pop.style.left = `${Math.max(4, r.left - 4)}px`;
+  pop.style.top = `${r.bottom + 6}px`;
+  pop.querySelectorAll('button').forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const tipo = b.dataset.t;
+      patchClipe(clipeId, { transicao: tipo ? { tipo } : null });
+      fecharPopoverTransicao();
+    };
+  });
+  popTransicao = pop;
+  setTimeout(() => document.addEventListener('click', fecharPopoverTransicao, { once: true }), 0);
+}
 
 const tlVisual = criarTimeline({
   sufixo: '2', video: 'playerFinal',
@@ -411,6 +477,33 @@ function desenharFicha() {
       ? patchClipe(c.id, { ativo: c.ativo === false })
       : patchClipe(c.id, { bloco: el.dataset.b }));
   });
+
+  // Efeitos deste clipe: sobrescrevem os do projeto, chave a chave, enquanto
+  // ele toca. Sempre manda o objeto inteiro (mesclado localmente) — o mesmo
+  // padrão de "elementos" em salvarEstilo, para não perder chave nenhuma.
+  const efeitos = c.efeitos || {};
+  $('#clipeEfeitosToggles').innerHTML = ['grao', 'vinheta', 'shake'].map((k) => {
+    const on = typeof efeitos[k] === 'number';
+    const nome = EFEITOS.find((e) => e.id === k)?.nome || k;
+    return `<button class="toggle compacto${on ? ' on' : ''}" data-k="${k}" type="button">
+      <span class="caixa">✓</span>${nome}</button>`;
+  }).join('');
+  $('#clipeEfeitosToggles').querySelectorAll('[data-k]').forEach((el) => {
+    el.onclick = () => {
+      const k = el.dataset.k;
+      const atuais = { ...(c.efeitos || {}) };
+      if (typeof atuais[k] === 'number') delete atuais[k]; else atuais[k] = 0.5;
+      patchClipe(c.id, { efeitos: Object.keys(atuais).length ? atuais : null });
+    };
+  });
+  const campoCongelar = $('#clipeCongelar');
+  campoCongelar.value = efeitos.congelar ?? 0;
+  campoCongelar.onchange = (e) => {
+    const v = Math.max(0, Math.min(5, Number(e.target.value) || 0));
+    const atuais = { ...(c.efeitos || {}) };
+    if (v > 0) atuais.congelar = v; else delete atuais.congelar;
+    patchClipe(c.id, { efeitos: Object.keys(atuais).length ? atuais : null });
+  };
 }
 
 async function patchClipe(id, corpo) {
@@ -490,10 +583,169 @@ function montarEstilo() {
     const el = e.target.closest('.toggle');
     if (!el) return;
     const k = el.dataset.id;
+    // "Flash na transi\u00e7\u00e3o" virou atalho para a transi\u00e7\u00e3o de mesmo nome, para
+    // n\u00e3o haver dois lugares dizendo coisas diferentes sobre a transi\u00e7\u00e3o.
+    if (k === 'flashNaTransicao') {
+      const ligado = transicaoPadrao(P.estilo).tipo === 'flash';
+      salvarEstilo({ transicao: { tipo: ligado ? 'corte' : 'flash' } });
+      return;
+    }
     salvarEstilo({ elementos: { ...P.estilo.elementos, [k]: !P.estilo.elementos[k] } });
   };
 
+  montarTransicoes();
+  montarEfeitos();
+  montarIntro();
   animar();
+}
+
+/* --------------------------------------------------------------- transi\u00e7\u00e3o */
+function montarTransicoes() {
+  $('#transicoesGrade').innerHTML = TRANSICOES.map((t) => `
+    <div class="preset transPreset" data-id="${t.id}" title="${t.descricao}">
+      <span class="marcaSel">\u2713</span>
+      <div class="amostraTrans tipo-${t.id}"><span class="ret retA"></span><span class="ret retB"></span></div>
+      <div class="nomeTrans">${t.nome}</div>
+    </div>`).join('');
+  $('#transicoesGrade').onclick = (e) => {
+    const el = e.target.closest('.transPreset');
+    if (!el) return;
+    salvarEstilo({ transicao: { tipo: el.dataset.id } });
+  };
+}
+
+/* ---------------------------------------------------------------- efeitos */
+// Mapa do id do cat\u00e1logo (kebab-case) para a chave real em `estilo.efeitos`.
+const CHAVE_EFEITO = {
+  grao: 'grao', vinheta: 'vinheta', shake: 'shake',
+  'blur-fundo': 'blurFundo', 'barra-progresso': 'barraProgresso', letterbox: 'letterbox',
+};
+const EFEITOS_COM_INTENSIDADE = new Set(['grao', 'vinheta', 'shake']);
+const EFEITOS_PROJETO = EFEITOS.filter((e) => e.escopo === 'projeto');
+
+function efeitoLigado(efeitos, id) {
+  const e = efeitos || {};
+  if (EFEITOS_COM_INTENSIDADE.has(id)) return typeof e[CHAVE_EFEITO[id]] === 'number' && e[CHAVE_EFEITO[id]] > 0;
+  if (id === 'barra-progresso') return !!e.barraProgresso;
+  return !!e[CHAVE_EFEITO[id]];
+}
+
+function montarEfeitos() {
+  $('#efeitosGrade').innerHTML = EFEITOS_PROJETO.map((e) => {
+    if (EFEITOS_COM_INTENSIDADE.has(e.id)) {
+      return `<div class="efeitoLinha" data-id="${e.id}">
+        <button class="toggle" data-toggle="${e.id}" type="button">
+          <span class="caixa">\u2713</span>${e.nome}</button>
+        <input type="range" min="0" max="100" value="0" data-range="${e.id}" disabled>
+      </div>`;
+    }
+    if (e.id === 'barra-progresso') {
+      return `<div class="efeitoLinha" data-id="${e.id}">
+        <button class="toggle" data-toggle="${e.id}" type="button">
+          <span class="caixa">\u2713</span>${e.nome}</button>
+        <div class="segmentado" data-posicao style="display:none">
+          <button data-pos="topo" type="button">Topo</button>
+          <button data-pos="base" type="button">Base</button>
+        </div>
+      </div>`;
+    }
+    return `<div class="efeitoLinha" data-id="${e.id}">
+      <button class="toggle" data-toggle="${e.id}" type="button">
+        <span class="caixa">\u2713</span>${e.nome}</button>
+    </div>`;
+  }).join('');
+
+  $('#efeitosGrade').onclick = (e) => {
+    const tBtn = e.target.closest('[data-toggle]');
+    if (tBtn) { alternarEfeito(tBtn.dataset.toggle); return; }
+    const pBtn = e.target.closest('[data-pos]');
+    if (pBtn) salvarEfeito('barraProgresso', { posicao: pBtn.dataset.pos });
+  };
+
+  let tRange = null;
+  $('#efeitosGrade').addEventListener('input', (e) => {
+    const r = e.target.closest('input[type=range]');
+    if (!r) return;
+    clearTimeout(tRange);
+    tRange = setTimeout(() => salvarEfeito(CHAVE_EFEITO[r.dataset.range], Number(r.value) / 100), 300);
+  });
+}
+
+function alternarEfeito(id) {
+  const chave = CHAVE_EFEITO[id];
+  const atual = { ...(P.estilo.efeitos || {}) };
+  if (EFEITOS_COM_INTENSIDADE.has(id)) {
+    if (typeof atual[chave] === 'number') delete atual[chave]; else atual[chave] = 0.5;
+  } else if (id === 'barra-progresso') {
+    if (atual.barraProgresso) delete atual.barraProgresso; else atual.barraProgresso = { posicao: 'topo' };
+  } else {
+    atual[chave] = !atual[chave];
+    if (!atual[chave]) delete atual[chave];
+  }
+  salvarEstilo({ efeitos: atual });
+}
+
+function salvarEfeito(chave, valor) {
+  const atual = { ...(P.estilo.efeitos || {}), [chave]: valor };
+  salvarEstilo({ efeitos: atual });
+}
+
+/* ------------------------------------------------------------------ intro */
+function montarIntro() {
+  $('#introAnimacao').innerHTML = ANIMACOES_INTRO.map((a) => `<option value="${a}">${a}</option>`).join('');
+
+  $('#fIntro').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f || !P) return;
+    const fd = new FormData();
+    fd.append('arquivo', f);
+    fd.append('duracao', String(Number($('#introDuracao').value) || INTRO_PADRAO.duracao));
+    fd.append('animacao', $('#introAnimacao').value || INTRO_PADRAO.animacao);
+    fd.append('headline', $('#introHeadlineToggle').classList.contains('on') ? '1' : '0');
+    await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/intro`, { method: 'POST', body: fd });
+    e.target.value = '';
+    abrir(P.nome);
+  };
+
+  $('#introDuracao').onchange = (e) => {
+    const v = Math.max(1, Math.min(6, Number(e.target.value) || INTRO_PADRAO.duracao));
+    salvarIntro({ duracao: v });
+  };
+  $('#introAnimacao').onchange = (e) => salvarIntro({ animacao: e.target.value });
+  $('#introHeadlineToggle').onclick = () => {
+    salvarIntro({ headline: !$('#introHeadlineToggle').classList.contains('on') });
+  };
+  $('#btnTirarIntro').onclick = async () => {
+    if (!P) return;
+    await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/intro`, { method: 'DELETE' });
+    abrir(P.nome);
+  };
+}
+
+async function salvarIntro(patch) {
+  const r = await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/intro`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch),
+  });
+  if (r.ok) {
+    const corpo = await r.json().catch(() => patch);
+    P.intro = { ...P.intro, ...corpo };
+    aplicarIntro();
+  }
+}
+
+function aplicarIntro() {
+  const intro = P.intro;
+  $('#btnTirarIntro').style.display = intro ? '' : 'none';
+  $('#introCampos').style.display = intro ? '' : 'none';
+  if (!intro) { $('#introPreview').innerHTML = ''; return; }
+  const src = `/midia/${encodeURIComponent(P.nome)}/${intro.arquivo}`;
+  $('#introPreview').innerHTML = intro.tipo === 'video'
+    ? `<video src="${src}" muted></video>` : `<img src="${src}" alt="intro">`;
+  const campoDur = $('#introDuracao');
+  campoDur.value = intro.duracao ?? INTRO_PADRAO.duracao;
+  campoDur.disabled = intro.tipo === 'video';
+  $('#introAnimacao').value = intro.animacao || INTRO_PADRAO.animacao;
+  $('#introHeadlineToggle').classList.toggle('on', !!intro.headline);
 }
 
 /* ------------------------------------------------------- amostras animadas */
@@ -567,7 +819,38 @@ function aplicarEstilo() {
   $$('#tipoEdicao .card').forEach((el) => el.classList.toggle('on', el.dataset.id === s.tipoEdicao));
   $$('#headlines .preset').forEach((el) => el.classList.toggle('on', el.dataset.id === s.estiloHeadline));
   $$('#legendas .preset').forEach((el) => el.classList.toggle('on', el.dataset.id === s.estiloLegenda));
-  $$('#elementos .toggle').forEach((el) => el.classList.toggle('on', !!s.elementos?.[el.dataset.id]));
+
+  const transicao = transicaoPadrao(s);
+  $$('#elementos .toggle').forEach((el) => {
+    const k = el.dataset.id;
+    const on = k === 'flashNaTransicao' ? transicao.tipo === 'flash' : !!s.elementos?.[k];
+    el.classList.toggle('on', on);
+  });
+  $$('#transicoesGrade .transPreset').forEach((el) => el.classList.toggle('on', el.dataset.id === transicao.tipo));
+
+  const efeitos = s.efeitos || {};
+  $$('#efeitosGrade .efeitoLinha').forEach((linha) => {
+    const id = linha.dataset.id;
+    const ligado = efeitoLigado(efeitos, id);
+    linha.querySelector('[data-toggle]').classList.toggle('on', ligado);
+    if (EFEITOS_COM_INTENSIDADE.has(id)) {
+      const range = linha.querySelector('input[type=range]');
+      range.disabled = !ligado;
+      if (document.activeElement !== range) {
+        range.value = String(Math.round((efeitos[CHAVE_EFEITO[id]] ?? 0) * 100));
+      }
+    }
+    if (id === 'barra-progresso') {
+      const seg = linha.querySelector('[data-posicao]');
+      seg.style.display = ligado ? '' : 'none';
+      seg.querySelectorAll('[data-pos]').forEach((b) => {
+        b.classList.toggle('on', efeitos.barraProgresso?.posicao === b.dataset.pos);
+      });
+    }
+  });
+
+  aplicarIntro();
+
   if (document.activeElement !== $('#obs')) $('#obs').value = s.observacoes || '';
 
   // A dica só faz sentido quando nenhum dos presets escolhidos usa a cor.
@@ -575,11 +858,15 @@ function aplicarEstilo() {
     || ['karaoke', 'karaoke-linhas'].includes(s.estiloLegenda);
   $('#dicaCor').textContent = usamCor ? '' : 'os estilos escolhidos não usam destaque';
 
+  const efeitosLigados = EFEITOS_PROJETO.filter((e) => efeitoLigado(efeitos, e.id)).map((e) => e.nome);
   $('#resumoEstilo').textContent = [
     TIPOS_EDICAO.find((t) => t.id === s.tipoEdicao)?.nome,
     `headline ${HEADLINES.find((h) => h.id === s.estiloHeadline)?.nome || '—'}`,
     `legenda ${LEGENDAS.find((l) => l.id === s.estiloLegenda)?.nome || '—'}`,
-    ...ELEMENTOS.filter((e) => s.elementos?.[e.id]).map((e) => e.nome),
+    ...ELEMENTOS.filter((e) => e.id !== 'flashNaTransicao' && s.elementos?.[e.id]).map((e) => e.nome),
+    transicao.tipo !== 'corte' ? `transição ${TRANSICOES.find((t) => t.id === transicao.tipo)?.nome}` : null,
+    ...efeitosLigados,
+    P.intro ? 'com intro' : null,
   ].filter(Boolean).join(' · ');
 }
 
@@ -681,6 +968,7 @@ ws.onmessage = (ev) => {
 };
 
 montarEstilo();
+montarCor();
 listarProjetos();
 
 /* ================================================================== fase 2 */

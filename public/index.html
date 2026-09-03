@@ -262,6 +262,134 @@
   .toggle .ic{opacity:.85;flex:0 0 auto;display:grid;place-items:center;width:1.15rem}
   .toggle .ic svg{width:1.05rem;height:1.05rem}
 
+  /* ---- transição entre clipes: grade de cards com amostra animada ---- */
+  .gradeTrans{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.2rem,1fr));
+    gap:.9rem;max-width:70rem}
+  .transPreset{padding-bottom:.85rem}
+  .transPreset .nomeTrans{font-size:.86rem;margin-top:.6rem;text-align:center}
+  .amostraTrans{position:relative;height:3.6rem;border-radius:.6rem;overflow:hidden;
+    background:#050810}
+  .amostraTrans .ret{position:absolute;inset:0;border-radius:.6rem}
+  .amostraTrans .retA{background:var(--hook)}
+  .amostraTrans .retB{background:var(--recursos)}
+
+  @keyframes tCorteA{0%,49.9%{opacity:1}50%,100%{opacity:0}}
+  @keyframes tCorteB{0%,49.9%{opacity:0}50%,100%{opacity:1}}
+  .tipo-corte .retA{animation:tCorteA 1.2s infinite}
+  .tipo-corte .retB{animation:tCorteB 1.2s infinite}
+
+  @keyframes tCrossfadeA{0%,40%{opacity:1}62%,100%{opacity:0}}
+  @keyframes tCrossfadeB{0%,40%{opacity:0}62%,100%{opacity:1}}
+  .tipo-crossfade .retA{animation:tCrossfadeA 1.2s infinite}
+  .tipo-crossfade .retB{animation:tCrossfadeB 1.2s infinite}
+
+  .tipo-dip-preto .retA,.tipo-dip-branco .retA{animation:tCorteA 1.2s infinite}
+  .tipo-dip-preto .retB,.tipo-dip-branco .retB{animation:tCorteB 1.2s infinite}
+  .tipo-dip-preto::after,.tipo-dip-branco::after{content:'';position:absolute;inset:0;
+    opacity:0;z-index:2}
+  .tipo-dip-preto::after{background:#000;animation:tDip 1.2s infinite}
+  .tipo-dip-branco::after{background:#fff;animation:tDip 1.2s infinite}
+  @keyframes tDip{0%,40%{opacity:0}50%{opacity:1}60%,100%{opacity:0}}
+
+  .tipo-flash .retA{animation:tCorteA 1.2s infinite}
+  .tipo-flash .retB{animation:tCorteB 1.2s infinite}
+  .tipo-flash::after{content:'';position:absolute;inset:0;background:#fff;opacity:0;
+    z-index:2;animation:tFlash 1.2s infinite}
+  @keyframes tFlash{0%,45%{opacity:0}50%{opacity:.95}56%,100%{opacity:0}}
+
+  @keyframes tZoomA{0%,49.9%{opacity:1}50%,100%{opacity:0}}
+  @keyframes tZoomB{0%,50%{opacity:0;transform:scale(1.32)}64%{opacity:1;transform:scale(.94)}
+    78%{transform:scale(1.04)}100%{opacity:1;transform:scale(1)}}
+  .tipo-zoom-punch .retA{animation:tZoomA 1.2s infinite}
+  .tipo-zoom-punch .retB{animation:tZoomB 1.2s infinite;transform-origin:center}
+
+  @keyframes tWhipEsqA{0%,40%{opacity:1;transform:translateX(0);filter:blur(0)}
+    58%{opacity:0;transform:translateX(-100%);filter:blur(8px)}100%{opacity:0}}
+  @keyframes tWhipEsqB{0%,44%{opacity:0;transform:translateX(100%);filter:blur(8px)}
+    62%{opacity:1;transform:translateX(0);filter:blur(0)}100%{opacity:1}}
+  .tipo-whip-esquerda .retA{animation:tWhipEsqA 1.2s infinite}
+  .tipo-whip-esquerda .retB{animation:tWhipEsqB 1.2s infinite}
+  @keyframes tWhipDirA{0%,40%{opacity:1;transform:translateX(0);filter:blur(0)}
+    58%{opacity:0;transform:translateX(100%);filter:blur(8px)}100%{opacity:0}}
+  @keyframes tWhipDirB{0%,44%{opacity:0;transform:translateX(-100%);filter:blur(8px)}
+    62%{opacity:1;transform:translateX(0);filter:blur(0)}100%{opacity:1}}
+  .tipo-whip-direita .retA{animation:tWhipDirA 1.2s infinite}
+  .tipo-whip-direita .retB{animation:tWhipDirB 1.2s infinite}
+
+  @keyframes tSlideCimaA{0%,40%{opacity:1;transform:translateY(0)}
+    58%{opacity:0;transform:translateY(-100%)}100%{opacity:0}}
+  @keyframes tSlideCimaB{0%,44%{opacity:0;transform:translateY(100%)}
+    62%{opacity:1;transform:translateY(0)}100%{opacity:1}}
+  .tipo-slide-cima .retA{animation:tSlideCimaA 1.2s infinite}
+  .tipo-slide-cima .retB{animation:tSlideCimaB 1.2s infinite}
+  @keyframes tSlideBaixoA{0%,40%{opacity:1;transform:translateY(0)}
+    58%{opacity:0;transform:translateY(100%)}100%{opacity:0}}
+  @keyframes tSlideBaixoB{0%,44%{opacity:0;transform:translateY(-100%)}
+    62%{opacity:1;transform:translateY(0)}100%{opacity:1}}
+  .tipo-slide-baixo .retA{animation:tSlideBaixoA 1.2s infinite}
+  .tipo-slide-baixo .retB{animation:tSlideBaixoB 1.2s infinite}
+
+  @keyframes tBlurA{0%,40%{opacity:1;filter:blur(0)}60%{opacity:0;filter:blur(12px)}100%{opacity:0}}
+  @keyframes tBlurB{0%,40%{opacity:0;filter:blur(12px)}60%{opacity:1;filter:blur(0)}100%{opacity:1}}
+  .tipo-blur .retA{animation:tBlurA 1.2s infinite}
+  .tipo-blur .retB{animation:tBlurB 1.2s infinite}
+
+  @keyframes tGlitchA{0%,44%{opacity:1;transform:translateX(0)}
+    47%{transform:translateX(-6px)}50%{transform:translateX(4px);opacity:0}100%{opacity:0}}
+  @keyframes tGlitchB{0%,50%{opacity:0}53%{opacity:1;transform:translateX(6px)}
+    56%{transform:translateX(-4px)}62%{transform:translateX(0)}100%{opacity:1}}
+  .tipo-glitch .retA{animation:tGlitchA 1.2s steps(2,end) infinite;
+    clip-path:polygon(0 0,100% 0,100% 33%,0 33%)}
+  .tipo-glitch .retB{animation:tGlitchB 1.2s steps(2,end) infinite;
+    clip-path:polygon(0 66%,100% 66%,100% 100%,0 100%)}
+
+  /* ---- efeitos do projeto ---- */
+  .efeitosGrade{display:flex;flex-direction:column;gap:.7rem;max-width:44rem}
+  .efeitoLinha{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+  .efeitoLinha .toggle{min-width:13rem}
+  .efeitoLinha input[type=range]{width:11rem}
+  .segmentado{display:flex;gap:.4rem}
+  .segmentado button{border:1px solid var(--borda);background:var(--painel2);color:var(--fraco);
+    padding:.5rem .9rem;border-radius:.5rem;font-size:.88rem}
+  .segmentado button.on{border-color:var(--laranja);color:var(--laranja)}
+
+  /* ---- intro ---- */
+  .introBox{padding:1.1rem 1.2rem;background:var(--painel);border:1px solid var(--borda);
+    border-radius:var(--r);max-width:62rem}
+  .introPreview img,.introPreview video{max-height:11rem;border-radius:.6rem;
+    display:block;margin-bottom:.9rem;background:#000}
+  .introLinha{display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem}
+  .introCampos{display:flex;gap:1.3rem;align-items:center;flex-wrap:wrap;margin-bottom:.6rem;
+    font-size:.92rem;color:var(--fraco)}
+  .introCampos input,.introCampos select{background:var(--interno);border:1px solid var(--borda);
+    color:var(--texto);border-radius:.5rem;padding:.5rem .6rem;font:inherit}
+  .introCampos .toggle{padding:.55rem .9rem}
+
+  /* ---- efeitos do clipe (ficha) ---- */
+  .rotuloMini{color:var(--fraco);font:800 .74rem/1 sans-serif;letter-spacing:.12em}
+  .efeitosClipeLinha{margin-top:.9rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+  .togglesCompactos{display:flex;gap:.5rem;flex-wrap:wrap}
+  .toggle.compacto{padding:.45rem .75rem;font-size:.84rem}
+  .campoCongelar{display:flex;align-items:center;gap:.5rem;font-size:.88rem;color:var(--fraco)}
+  .campoCongelar input{background:var(--interno);border:1px solid var(--borda);color:var(--texto);
+    border-radius:.5rem;padding:.4rem .6rem;width:4.6rem;font:inherit}
+
+  /* ---- marcador de transição por clipe, na timeline ---- */
+  .marcaTransicao{position:absolute;top:-.35rem;width:1.05rem;height:1.05rem;border-radius:50%;
+    background:var(--painel2);border:.12rem solid var(--borda-forte);z-index:5;cursor:pointer;
+    transform:translateX(-50%);display:grid;place-items:center;color:var(--fraco);font-size:.6rem}
+  .marcaTransicao:hover{border-color:var(--laranja)}
+  .marcaTransicao.on{background:var(--laranja);border-color:var(--laranja);color:#1a0a02}
+  .popTransicao{position:fixed;z-index:50;background:var(--painel2);
+    border:1px solid var(--borda-forte);border-radius:.6rem;padding:.4rem;
+    display:flex;flex-direction:column;gap:.1rem;max-height:20rem;overflow-y:auto;
+    box-shadow:0 .6rem 1.6rem rgba(0,0,0,.5)}
+  .popTransicao button{padding:.5rem .9rem;text-align:left;border-radius:.4rem;
+    color:var(--texto);font-size:.88rem;white-space:nowrap}
+  .popTransicao button:hover{background:var(--painel)}
+  .popTransicao button:first-child{color:var(--fraco);border-bottom:1px solid var(--borda);
+    margin-bottom:.2rem;padding-bottom:.6rem}
+
   .obs{width:100%;background:var(--painel);border:1px solid var(--borda);
     border-radius:.75rem;color:var(--texto);padding:.8rem 1rem;font:.95rem/1.4 inherit;
     max-width:62rem}
@@ -272,6 +400,31 @@
     display:grid;place-items:center;font-size:.82rem;flex:0 0 auto}
 
   .vazio{color:var(--fraco);padding:4rem 1.2rem;text-align:center;line-height:1.7;font-size:1.08rem}
+
+  /* ============================ cor ============================ */
+  .faixaAviso{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;
+    background:var(--painel2);border:1px solid var(--laranja);color:var(--laranja);
+    border-radius:var(--r-p);padding:.85rem 1.1rem;margin-bottom:1.2rem;max-width:70rem}
+  .corLayout{display:grid;grid-template-columns:minmax(0,1fr) 24rem;gap:1.4rem;align-items:start}
+  .antesDepois{display:flex;gap:.8rem}
+  .colImg{flex:1;min-width:0}
+  .rotuloImg{display:block;color:var(--fraco);font:800 .74rem/1 sans-serif;
+    letter-spacing:.12em;margin-bottom:.5rem}
+  .colImg img{width:100%;border-radius:.6rem;background:#000;aspect-ratio:9/16;
+    object-fit:cover;display:block}
+  .transporteCor{display:flex;align-items:center;gap:.9rem;margin-top:.9rem}
+  .transporteCor input[type=range]{flex:1;width:auto}
+  .transporteCor span{font:600 .92rem/1 ui-monospace,Menlo,monospace;color:var(--fraco);
+    white-space:nowrap}
+  .lutCard{width:11.2rem;text-align:left;padding:.9rem 1rem}
+  .lutCard .nome{margin-top:0;font-weight:700}
+  .lutCard .descLut{color:var(--fraco);font-size:.78rem;margin-top:.35rem;line-height:1.35}
+  .ajustesCor{display:flex;flex-direction:column;gap:.75rem}
+  .ajusteLinha{display:flex;align-items:center;gap:.8rem}
+  .rotuloAjuste{width:9.6rem;flex:0 0 auto;font-size:.86rem;color:var(--fraco)}
+  .valorAjuste{width:2.8rem;text-align:right;font:600 .84rem/1 ui-monospace,Menlo,monospace;
+    color:var(--fraco)}
+  @media (max-width:1100px){ .corLayout{grid-template-columns:minmax(0,1fr)} }
 
   /* ============================ fase 2 / projetos ============================ */
   .linhaArquivo{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
@@ -486,6 +639,7 @@
 <div class="abas">
   <button class="on" data-aba="corte"><span class="fase">FASE 1</span><span class="nome">Corte</span></button>
   <button data-aba="estilo"><span class="nome">Estilo</span></button>
+  <button data-aba="cor"><span class="nome">Cor</span></button>
   <button data-aba="visual"><span class="fase">FASE 2</span><span class="nome">Visual</span></button>
 </div>
 
@@ -557,6 +711,13 @@
           <div class="quem">CLIPE SELECIONADO</div>
           <div class="fala" id="clipeTexto"></div>
           <div class="escolhaBloco" id="clipeBlocos"></div>
+          <div class="efeitosClipeLinha">
+            <span class="rotuloMini">EFEITOS DESTE CLIPE</span>
+            <div class="togglesCompactos" id="clipeEfeitosToggles"></div>
+            <label class="campoCongelar">Congelar no fim (s)
+              <input type="number" id="clipeCongelar" min="0" max="5" step="0.1">
+            </label>
+          </div>
         </div>
 
         <div class="acoes">
@@ -610,6 +771,35 @@
   </div>
 
   <div class="grupo">
+    <div class="rotulo">TRANSIÇÃO ENTRE CLIPES</div>
+    <div class="gradeTrans" id="transicoesGrade"></div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">EFEITOS</div>
+    <div class="efeitosGrade" id="efeitosGrade"></div>
+  </div>
+
+  <div class="grupo">
+    <div class="rotulo">INTRO <em>opcional, antes do primeiro clipe</em></div>
+    <div class="introBox" id="introBox">
+      <div class="introPreview" id="introPreview"></div>
+      <div class="introLinha">
+        <label class="btn">Enviar imagem ou vídeo de intro
+          <input type="file" id="fIntro" accept="image/*,video/*" hidden></label>
+        <button class="btn" id="btnTirarIntro" style="display:none">Tirar intro</button>
+      </div>
+      <div class="introCampos" id="introCampos" style="display:none">
+        <label>Duração (s) <input type="number" id="introDuracao" min="1" max="6" step="0.1"></label>
+        <label>Animação <select id="introAnimacao"></select></label>
+        <div class="toggle" id="introHeadlineToggle">
+          <span class="caixa">✓</span>Headline sobre a intro</div>
+      </div>
+      <div class="sub">O agente também gera intro por IA: peça no chat "gera uma intro com ia".</div>
+    </div>
+  </div>
+
+  <div class="grupo">
     <div class="rotulo">MATERIAL DA FASE 2
       <em>b-roll alimenta a tela dividida · a trilha entra por baixo da fala</em></div>
     <div class="linhaArquivo">
@@ -634,6 +824,40 @@
   </div>
 
   <button class="btn primario" id="btnFase2">Confirmar e iniciar a Fase 2</button>
+</section>
+
+<!-- ============================ COR ============================ -->
+<section class="aba" id="aba-cor">
+  <div class="tituloEstilo">Correção de cor</div>
+
+  <div class="faixaAviso" id="faixaAvisoCor" style="display:none">
+    <span>A cor entra no vídeo quando o corte é refeito</span>
+    <button class="btn" id="btnRefazerCorte">Refazer o corte agora</button>
+  </div>
+
+  <div class="corLayout">
+    <div>
+      <div class="antesDepois">
+        <div class="colImg"><span class="rotuloImg">ANTES</span><img id="imgAntes" alt="Antes"></div>
+        <div class="colImg"><span class="rotuloImg">DEPOIS</span><img id="imgDepois" alt="Depois"></div>
+      </div>
+      <div class="transporteCor">
+        <input type="range" id="sliderTempoCor" min="0" max="1" step="0.01" value="0">
+        <span id="tempoCorTexto">0:00</span>
+        <button class="btn" id="btnAtualizarPreview">Atualizar preview</button>
+      </div>
+    </div>
+    <div>
+      <div class="grupo">
+        <div class="rotulo">LUT</div>
+        <div class="cards" id="lutGrade"></div>
+      </div>
+      <div class="grupo">
+        <div class="rotulo">AJUSTES <em><button class="linkico" id="btnZerarCor">zerar</button></em></div>
+        <div class="ajustesCor" id="ajustesCor"></div>
+      </div>
+    </div>
+  </div>
 </section>
 
 <!-- ============================ FASE 2 ============================ -->

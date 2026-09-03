@@ -57,7 +57,10 @@ a mesma narração. Sai coisa assim:
 **O campo de texto executa comandos de verdade** — não é enfeite:
 `aprovar` · `pedir ajuste` · `refazer o corte` · `renderizar a fase 2` ·
 `cor #FF5200` · `legenda karaokê` · `headline contorno` · `tela dividida` ·
-`liga o flash` · `tirar o clipe 5` · `o que ficou no corte`.
+`liga o flash` · `tirar o clipe 5` · `o que ficou no corte` ·
+`transição zoom` · `liga vinheta 50%` · `intro com fade` ·
+`legenda no meio, maior` · `destaca as palavras faturamento e processo` ·
+`exporta srt`.
 
 O botão **Confirmar e iniciar a Fase 2** (aba Estilo) e o comando
 `renderizar a fase 2` fazem a mesma coisa: colocam o render na fila.
@@ -111,8 +114,13 @@ graça e nunca consome cota. O número está em `src/shared/config.js`
 No modo Claude ele usa as mesmas ações do resto do sistema como ferramentas
 (`src/server/ferramentas.js`): aprovar, pedir ajuste, refazer o corte,
 renderizar a Fase 2, mudar estilo, ligar/desligar elemento, ligar/desligar
-clipe e mostrar a tabela do corte. Ele não tem caminho paralelo — faz o mesmo
-que os botões.
+clipe, mostrar a tabela do corte, mudar a transição (global ou por clipe),
+ligar/desligar efeito (grão, vinheta, tremor, blur de fundo, barra de
+progresso, letterbox, congelar), ajustar ou tirar a intro, configurar a
+legenda (posição, escala, alinhamento, caixa alta, antecedência, palavras
+por bloco), destacar palavras-chave, editar/ocultar uma palavra e exportar a
+legenda em `.srt`/`.ass`. Ele não tem caminho paralelo — faz o mesmo que os
+botões.
 
 ### Geração por IA (Magnific) — só quando você pede
 

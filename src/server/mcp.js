@@ -36,7 +36,7 @@ function origemPermitida(ip) {
   return segundo >= 16 && segundo <= 31;
 }
 
-/** Converte um input_schema JSON (so string/boolean/number/enum) para forma zod. */
+/** Converte um input_schema JSON (so string/boolean/number/array de string/enum) para forma zod. */
 function paraZod(inputSchema) {
   const props = inputSchema?.properties || {};
   const obrigatorios = new Set(inputSchema?.required || []);
@@ -46,6 +46,10 @@ function paraZod(inputSchema) {
     if (def.enum) z_campo = z.enum(def.enum);
     else if (def.type === 'boolean') z_campo = z.boolean();
     else if (def.type === 'number') z_campo = z.number();
+    // So array de string existe hoje (destacar_palavras) — sem isso o
+    // parametro cai no default `z.string()` e o Claude nao consegue mandar
+    // uma lista pela ferramenta.
+    else if (def.type === 'array') z_campo = z.array(z.string());
     else z_campo = z.string();
     if (def.description) z_campo = z_campo.describe(def.description);
     if (!obrigatorios.has(campo)) z_campo = z_campo.optional();

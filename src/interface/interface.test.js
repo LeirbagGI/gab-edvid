@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
+import { TRANSICOES } from '../shared/efeitos.js';
+import { LUTS } from '../shared/cor.js';
 
 /**
  * Testa a interface num DOM de verdade (jsdom), sem navegador.
@@ -44,6 +46,7 @@ function projetoFalso() {
       elementos: { automacaoZoomIn: true },
       observacoes: '',
     },
+    cor: null,
     fase2: { status: 'nao-iniciada' },
     conversa: [{ quem: 'edvid', tipo: 'texto', texto: 'oi', em: '2026-01-01T00:00:00Z' }],
   };
@@ -67,9 +70,35 @@ async function montarPagina() {
   window.fetch = async (url, opcoes = {}) => {
     pedidos.push({ url: String(url), metodo: opcoes.method || 'GET', corpo: opcoes.body });
     const u = String(url);
+    const metodo = opcoes.method || 'GET';
     const json = (v) => ({ ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) });
     if (u.includes('/api/projetos')) return json([{ nome: 'Teste', statusFase1: 'aguardando-aprovacao', statusFase2: 'nao-iniciada', duracao: 9 }]);
+    if (u.includes('/api/luts')) return json(LUTS);
     if (u.includes('/api/fila')) return json({ atual: null, fila: [], feitos: [] });
+    // Espelha o merge raso do servidor de verdade (`p.estilo = {...p.estilo, ...body}`),
+    // senão salvarEstilo() sobrescreve P.estilo com o corpo errado na volta.
+    if (metodo === 'PUT' && u.includes('/estilo')) {
+      const patch = JSON.parse(opcoes.body || '{}');
+      projeto.estilo = { ...projeto.estilo, ...patch };
+      return json(projeto.estilo);
+    }
+    if (metodo === 'PUT' && u.includes('/cor')) {
+      const patch = JSON.parse(opcoes.body || '{}');
+      const atual = projeto.cor || { lut: null, intensidade: 1, ajustes: {} };
+      projeto.cor = {
+        lut: 'lut' in patch ? patch.lut : atual.lut,
+        intensidade: 'intensidade' in patch ? patch.intensidade : atual.intensidade,
+        ajustes: { ...atual.ajustes, ...(patch.ajustes || {}) },
+      };
+      return json({ cor: projeto.cor, precisaRefazer: true });
+    }
+    if (metodo === 'PATCH' && u.includes('/clipe/')) {
+      const id = decodeURIComponent(u.split('/clipe/')[1]);
+      const patch = JSON.parse(opcoes.body || '{}');
+      const c = projeto.fase1.clipes.find((x) => x.id === id);
+      if (c) Object.assign(c, patch);
+      return json(c || {});
+    }
     if (u.includes('/api/projeto/')) return json(projeto);
     return json({ ok: true });
   };
@@ -80,21 +109,40 @@ async function montarPagina() {
 
   const presets = fs.readFileSync(path.join(RAIZ, 'src', 'shared', 'presets.js'), 'utf8');
   const legendaMotor = fs.readFileSync(path.join(RAIZ, 'src', 'shared', 'legenda-motor.js'), 'utf8');
+  const efeitos = fs.readFileSync(path.join(RAIZ, 'src', 'shared', 'efeitos.js'), 'utf8');
+  const corCompartilhado = fs.readFileSync(path.join(RAIZ, 'src', 'shared', 'cor.js'), 'utf8');
   const amostraLegenda = fs.readFileSync(path.join(PUBLICO, 'amostra-legenda.js'), 'utf8');
+  const corPagina = fs.readFileSync(path.join(PUBLICO, 'cor.js'), 'utf8');
   const app = fs.readFileSync(path.join(PUBLICO, 'app.js'), 'utf8');
-  // Junta os quatro num script só, trocando os imports pelo corpo dos módulos.
+
+  // Junta os módulos num script só, trocando os imports pelo corpo deles.
   const semExportPresets = presets.replace(/^export /gm, '');
   const semExportLegendaMotor = legendaMotor.replace(/^export /gm, '');
+  const semExportEfeitos = efeitos.replace(/^export /gm, '');
+  const semExportCorCompartilhado = corCompartilhado.replace(/^export /gm, '');
   const semImportAmostra = amostraLegenda
     .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/presets\.js';/m, '')
     .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/legenda-motor\.js';/m, '')
     .replace(/^export /gm, '');
+  // public/cor.js declara `$`/`$$` locais, do mesmo nome que app.js — sem
+  // isolamento (module scope de verdade) os dois `const $` colidiriam no
+  // mesmo eval. A IIFE isola tudo e só expõe as duas funções que app.js chama.
+  const semImportCorPagina = corPagina
+    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/cor\.js';/m, '')
+    .replace(/^export /gm, '');
+  const corPaginaEnvolta = `(function () {\n${semImportCorPagina}\n`
+    + 'window.montarCor = montarCor; window.aplicarCor = aplicarCor;\n})();';
   const semImportApp = app
     .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/presets\.js';/m, '')
-    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/amostra-legenda\.js';/m, '');
+    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/amostra-legenda\.js';/m, '')
+    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/efeitos\.js';/m, '')
+    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/cor\.js';/m, '');
 
   try {
-    window.eval(`${semExportPresets}\n${semExportLegendaMotor}\n${semImportAmostra}\n${semImportApp}`);
+    window.eval([
+      semExportPresets, semExportLegendaMotor, semExportEfeitos, semExportCorCompartilhado,
+      semImportAmostra, corPaginaEnvolta, semImportApp,
+    ].join('\n'));
   } catch (e) {
     erros.push(`erro ao carregar o app.js: ${e.message}`);
   }
@@ -218,4 +266,80 @@ test('a headline não é sobrescrita enquanto está sendo digitada', async (t) =
   window.aplicarFase2?.();
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(campo.value, 'digitando ainda');
+});
+
+/* ---------------------------------------------------------- UI-1: estilo */
+
+test('a aba Estilo mostra um card por transição e o clicado vira PUT /estilo com o tipo', async (t) => {
+  const { doc, window, erros, pedidos, fechar } = await montarPagina();
+  t.after(fechar);
+  assert.deepEqual(erros, []);
+
+  const cards = doc.querySelectorAll('#transicoesGrade .transPreset');
+  assert.equal(cards.length, TRANSICOES.length, `esperava ${TRANSICOES.length} cards de transição`);
+
+  const alvo = doc.querySelector('#transicoesGrade .transPreset[data-id="crossfade"]');
+  assert.ok(alvo, 'card da transição crossfade não existe');
+  alvo.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 30));
+
+  const put = pedidos.find((p) => p.metodo === 'PUT' && p.url.includes('/estilo')
+    && JSON.parse(p.corpo || '{}').transicao?.tipo === 'crossfade');
+  assert.ok(put, `nenhum PUT /estilo com transicao crossfade. Pedidos: ${
+    pedidos.map((p) => `${p.metodo} ${p.url}`).join(', ')}`);
+});
+
+test('ligar o grão e mover o range manda efeitos.grao entre 0 e 1', async (t) => {
+  const { doc, window, erros, pedidos, fechar } = await montarPagina();
+  t.after(fechar);
+  assert.deepEqual(erros, []);
+
+  const toggle = doc.querySelector('#efeitosGrade [data-toggle="grao"]');
+  assert.ok(toggle, 'toggle do grão não existe');
+  toggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 30));
+
+  const range = doc.querySelector('#efeitosGrade input[data-range="grao"]');
+  assert.ok(range, 'range do grão não existe');
+  assert.equal(range.disabled, false, 'o range devia ligar junto com o toggle');
+  range.value = '80';
+  range.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 350)); // debounce de 300 ms do range
+
+  const puts = pedidos
+    .filter((p) => p.metodo === 'PUT' && p.url.includes('/estilo'))
+    .map((p) => JSON.parse(p.corpo || '{}'))
+    .filter((b) => typeof b.efeitos?.grao === 'number');
+  assert.ok(puts.length > 0, 'nenhum PUT /estilo mandou efeitos.grao');
+  const ultimo = puts.at(-1).efeitos.grao;
+  assert.ok(ultimo >= 0 && ultimo <= 1, `efeitos.grao fora da faixa 0..1: ${ultimo}`);
+});
+
+test('a aba Cor monta os cards de LUT e o clicado vira PUT /cor com o lut', async (t) => {
+  const { doc, window, erros, pedidos, fechar } = await montarPagina();
+  t.after(fechar);
+  assert.deepEqual(erros, []);
+  // montarCor() busca /api/luts de forma assíncrona — dá tempo de a resposta chegar.
+  await new Promise((r) => setTimeout(r, 30));
+
+  const cards = doc.querySelectorAll('#lutGrade .lutCard');
+  assert.equal(cards.length, LUTS.length + 1, `esperava ${LUTS.length + 1} cards (LUTs + "Nenhuma")`);
+
+  const alvo = doc.querySelector(`#lutGrade .lutCard[data-id="${LUTS[0].id}"]`);
+  assert.ok(alvo, 'card da primeira LUT não existe');
+  alvo.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 350)); // debounce de 300 ms do PUT /cor
+
+  const put = pedidos.find((p) => p.metodo === 'PUT' && p.url.includes('/cor')
+    && JSON.parse(p.corpo || '{}').lut === LUTS[0].id);
+  assert.ok(put, `nenhum PUT /cor com o lut. Pedidos: ${
+    pedidos.map((p) => `${p.metodo} ${p.url}`).join(', ')}`);
+});
+
+test('a timeline desenha n-1 marcadores de transição para n clipes', async (t) => {
+  const { doc, erros, fechar } = await montarPagina();
+  t.after(fechar);
+  assert.deepEqual(erros, []);
+  const marcadores = doc.querySelectorAll('#trilhaClipes .marcaTransicao');
+  assert.equal(marcadores.length, 2, 'esperava 2 marcadores para 3 clipes');
 });

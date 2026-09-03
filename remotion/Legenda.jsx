@@ -11,28 +11,45 @@ import {
  * O motor (`src/shared/legenda-motor.js`) e o mesmo que alimenta a amostra
  * animada da aba Estilo (`public/amostra-legenda.js`) — se muda aqui, muda
  * la, e essa e a razao de o card ser igual ao video "por construcao".
+ *
+ * `estilo.legenda` (API-2, `PUT /api/projeto/:nome/legenda`) e um override
+ * OPCIONAL por cima do preset: posicao, escala (multiplica o tamanho do
+ * corpo), alinhamento, maiusculas (bool — `null`/ausente cai no default do
+ * preset), antecedencia (passada para `estadoEm`) e maxPalavras (passada
+ * para o agrupamento). Sem `estilo.legenda`, o resultado e identico ao de
+ * antes desta story.
  */
 export function Legenda({ clipe, t, estilo, cor, altura }) {
   const preset = acharLegenda(estilo.estiloLegenda);
+  const overrides = estilo.legenda || {};
   const palavras = clipe?.palavras;
 
   const blocos = useMemo(() => {
     if (preset.modo === 'nenhum' || !palavras?.length) return [];
-    return agruparBlocos(palavras, { ...agrupamentoDoPreset(preset), pausaMax: 0.6 });
-  }, [preset, palavras]);
+    const agrupamento = agrupamentoDoPreset(preset);
+    return agruparBlocos(palavras, {
+      ...agrupamento,
+      maxPalavras: overrides.maxPalavras ?? agrupamento.maxPalavras,
+      pausaMax: 0.6,
+    });
+  }, [preset, palavras, overrides.maxPalavras]);
 
   if (!blocos.length) return null;
 
-  const estado = estadoEm(blocos, t);
+  const estado = estadoEm(blocos, t, overrides.antecedencia !== undefined ? { antecedencia: overrides.antecedencia } : undefined);
   if (!estado) return null;
 
   const {
     bloco, dtBloco, indiceAtiva, dtPalavra, progressoPalavra,
   } = estado;
-  const corpo = Math.round(altura * 0.032 * (preset.escala || 1));
+  const escalaEfetiva = overrides.escala ?? preset.escala ?? 1;
+  const corpo = Math.round(altura * 0.032 * escalaEfetiva);
   const fundoLinha = preset.fundoLinha ? preset.fundoLinha(cor) : null;
   const entrada = estiloBloco(preset, { dtBloco, cor });
   const emoji = preset.emoji ? emojiDoBloco(bloco) : null;
+  // `null` volta ao default do preset — so `true`/`false` explicito muda.
+  const maiusculasEfetivo = (overrides.maiusculas === undefined || overrides.maiusculas === null)
+    ? preset.maiusculas : overrides.maiusculas;
 
   // `fundoLinha` (faixa, bolha, moldura) precisa hugar so o texto, entao vira
   // um wrapper `inline-block` dentro do container — que continua largo (8% a
@@ -86,7 +103,11 @@ export function Legenda({ clipe, t, estilo, cor, altura }) {
 
   return (
     <div style={{
-      ...caixaLegenda(altura, preset), fontSize: corpo, ...preset.base(cor), ...entrada,
+      ...caixaLegenda(altura, preset, overrides),
+      fontSize: corpo,
+      ...preset.base(cor),
+      ...entrada,
+      textTransform: maiusculasEfetivo ? 'uppercase' : 'none',
     }}
     >
       {envolver(<>{conteudo}{emoji ? ` ${emoji}` : ''}</>)}
@@ -94,21 +115,21 @@ export function Legenda({ clipe, t, estilo, cor, altura }) {
   );
 }
 
-const caixaLegenda = (altura, preset = {}) => {
-  const posicao = preset.posicao || 'baixo';
+const caixaLegenda = (altura, preset = {}, overrides = {}) => {
+  const posicao = overrides.posicao || preset.posicao || 'baixo';
   const posEstilo = posicao === 'meio'
     ? { top: '50%', transform: 'translateY(-50%)' }
     : posicao === 'alto'
       ? { top: altura * 0.30 }
       : { bottom: altura * 0.17 };
+  const alinhamento = overrides.alinhamento === 'esquerda' ? 'left' : 'center';
 
   return {
     position: 'absolute',
     left: '8%', right: '8%',
-    textAlign: 'center',
+    textAlign: alinhamento,
     lineHeight: 1.25,
     fontFamily: 'Inter, -apple-system, Helvetica, Arial, sans-serif',
-    ...(preset.maiusculas ? { textTransform: 'uppercase' } : null),
     ...posEstilo,
   };
 };

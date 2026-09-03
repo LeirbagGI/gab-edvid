@@ -5,6 +5,9 @@ import { HEADLINES, LEGENDAS, TIPOS_EDICAO, ELEMENTOS, CORES } from '../shared/p
 import { tabelaDoCorte, seg } from '../shared/conversa.js';
 import { LUTS, AJUSTES_PADRAO, corPadrao, validarCor } from '../shared/cor.js';
 import { caminhoProjeto } from '../fase1/projeto.js';
+import { TRANSICOES, EFEITOS, ANIMACOES_INTRO, acharEfeito } from '../shared/efeitos.js';
+import { gerarSrt, gerarAss } from '../shared/legenda-export.js';
+import { editarPalavra, validarConfigLegenda } from './legenda-edicao.js';
 
 /**
  * As ferramentas do chat — o que o Claude (via MCP), o Ollama e os comandos
@@ -138,6 +141,109 @@ export const FERRAMENTAS = [
       required: ['url', 'tipo'],
     },
   },
+  {
+    name: 'mudar_transicao',
+    description: `Muda a transição entre clipes: sem "clipe" é global (todos); com "clipe" (id, ex: c3), `
+      + `só naquele. Ids: ${lista(TRANSICOES)}.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        tipo: { type: 'string', enum: TRANSICOES.map((t) => t.id) },
+        clipe: { type: 'string', description: 'Id do clipe, ex: c3. Sem isso, muda a transição global.' },
+      },
+      required: ['tipo'],
+    },
+  },
+  {
+    name: 'ligar_efeito',
+    description: `Liga ou desliga um efeito visual. Ids: ${lista(EFEITOS)}. `
+      + 'Global por padrão; passe "clipe" (id, ex: c3) para efeito por clipe (obrigatório para "congelar"). '
+      + '"intensidade" é 0 a 1 (ou segundos, 0 a 5, para congelar). "posicao" (topo|base) só serve para barra-progresso.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        efeito: { type: 'string', enum: EFEITOS.map((e) => e.id) },
+        ligado: { type: 'boolean' },
+        intensidade: { type: 'number' },
+        clipe: { type: 'string' },
+        posicao: { type: 'string', enum: ['topo', 'base'] },
+      },
+      required: ['efeito', 'ligado'],
+    },
+  },
+  {
+    name: 'definir_intro',
+    description: 'Ajusta duração (só imagem), animação ou headline da intro que já existe no projeto. '
+      + 'Não cria a intro do zero — o arquivo entra por baixar_para_projeto (tipo intro) ou pelo upload da aba FASE 2.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        duracao: { type: 'number', description: 'Segundos, só para intro de imagem.' },
+        animacao: { type: 'string', enum: ANIMACOES_INTRO },
+        headline: { type: 'boolean', description: 'Mostrar a headline já durante a intro.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'tirar_intro',
+    description: 'Remove a intro do projeto (apaga o arquivo e o campo).',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'configurar_legenda',
+    description: 'Ajusta posição, escala, alinhamento, caixa alta, antecedência ou máximo de palavras por bloco '
+      + 'da legenda — sobrepõe o preset escolhido em mudar_estilo, sem trocar o estilo.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        posicao: { type: 'string', enum: ['baixo', 'meio', 'alto'] },
+        escala: { type: 'number', description: '0.7 a 1.6' },
+        alinhamento: { type: 'string', enum: ['centro', 'esquerda'] },
+        maiusculas: { type: 'boolean' },
+        antecedencia: { type: 'number', description: 'Segundos, 0 a 0.4 — quanto antes do áudio a palavra acende.' },
+        maxPalavras: { type: 'number', description: 'Palavras por bloco, 1 a 6.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'destacar_palavras',
+    description: 'Marca destaque nas palavras da lista (sem acento, sem caixa) em todos os clipes. '
+      + 'Com substituir: true, desmarca o destaque das que não estão na lista.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        palavras: { type: 'array', items: { type: 'string' }, description: 'Ex: ["faturamento", "processo"]' },
+        substituir: { type: 'boolean' },
+      },
+      required: ['palavras'],
+    },
+  },
+  {
+    name: 'editar_palavra',
+    description: 'Edita o texto ou oculta uma palavra da legenda (oculta: a legenda pula, o áudio continua). '
+      + 'Para dividir, juntar ou deslocar no tempo, use a aba de edição de legenda.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        clipe: { type: 'string', description: 'Id do clipe, ex: c3' },
+        indice: { type: 'number', description: 'Índice da palavra dentro do clipe, começando em 0' },
+        texto: { type: 'string' },
+        oculta: { type: 'boolean' },
+      },
+      required: ['clipe', 'indice'],
+    },
+  },
+  {
+    name: 'exportar_legenda',
+    description: 'Exporta a legenda do corte em arquivo .srt ou .ass, na pasta do projeto.',
+    input_schema: {
+      type: 'object',
+      properties: { formato: { type: 'string', enum: ['srt', 'ass'] } },
+      required: ['formato'],
+    },
+  },
 ];
 
 /**
@@ -258,6 +364,138 @@ function fazer(nome, entrada, projeto, trabalhos) {
 
     case 'baixar_para_projeto':
       return baixarParaProjeto(entrada, projeto);
+
+    case 'mudar_transicao': {
+      if (!TRANSICOES.some((t) => t.id === entrada.tipo)) return `Não conheço a transição "${entrada.tipo}".`;
+      if (entrada.clipe) {
+        const c = projeto.fase1?.clipes?.find((x) => x.id === entrada.clipe);
+        if (!c) return `Não existe o clipe ${entrada.clipe}.`;
+        c.transicao = { tipo: entrada.tipo };
+        return `Transição do clipe ${entrada.clipe}: ${entrada.tipo}.`;
+      }
+      projeto.estilo.transicao = { tipo: entrada.tipo };
+      projeto.estilo.elementos = { ...(projeto.estilo.elementos || {}), flashNaTransicao: entrada.tipo === 'flash' };
+      return `Transição global: ${entrada.tipo}.`;
+    }
+
+    case 'ligar_efeito': {
+      const def = acharEfeito(entrada.efeito);
+      if (!def) return `Não conheço o efeito "${entrada.efeito}".`;
+
+      if (def.escopo === 'clipe') {
+        if (!entrada.clipe) return `O efeito ${entrada.efeito} é por clipe — diga qual (ex: c3).`;
+        const c = projeto.fase1?.clipes?.find((x) => x.id === entrada.clipe);
+        if (!c) return `Não existe o clipe ${entrada.clipe}.`;
+        c.efeitos = { ...(c.efeitos || {}) };
+        if (entrada.ligado) {
+          c.efeitos[entrada.efeito] = typeof entrada.intensidade === 'number'
+            ? Math.min(5, Math.max(0, entrada.intensidade)) : 1.5;
+        } else {
+          delete c.efeitos[entrada.efeito];
+          if (!Object.keys(c.efeitos).length) delete c.efeitos;
+        }
+        return `${entrada.efeito} no clipe ${entrada.clipe}: ${entrada.ligado ? 'ligado' : 'desligado'}.`;
+      }
+
+      projeto.estilo.efeitos = { ...(projeto.estilo.efeitos || {}) };
+      if (entrada.efeito === 'barra-progresso') {
+        if (entrada.ligado) {
+          projeto.estilo.efeitos.barraProgresso = { posicao: entrada.posicao === 'base' ? 'base' : 'topo' };
+        } else {
+          delete projeto.estilo.efeitos.barraProgresso;
+        }
+      } else if (entrada.efeito === 'blur-fundo') {
+        if (entrada.ligado) projeto.estilo.efeitos.blurFundo = true; else delete projeto.estilo.efeitos.blurFundo;
+      } else if (entrada.efeito === 'letterbox') {
+        if (entrada.ligado) projeto.estilo.efeitos.letterbox = true; else delete projeto.estilo.efeitos.letterbox;
+      } else if (entrada.ligado) {
+        projeto.estilo.efeitos[entrada.efeito] = typeof entrada.intensidade === 'number'
+          ? Math.min(1, Math.max(0, entrada.intensidade)) : 0.5;
+      } else {
+        delete projeto.estilo.efeitos[entrada.efeito];
+      }
+      return `${entrada.efeito}: ${entrada.ligado ? 'ligado' : 'desligado'}.`;
+    }
+
+    case 'definir_intro': {
+      if (!projeto.intro) return 'Ainda não há intro — gere ou envie uma imagem/vídeo primeiro.';
+      const mudou = [];
+      if (typeof entrada.duracao === 'number') {
+        if (projeto.intro.tipo !== 'imagem') {
+          return 'Duração só se ajusta em intro de imagem — vídeo usa a duração de origem.';
+        }
+        projeto.intro.duracao = entrada.duracao;
+        mudou.push(`duracao=${entrada.duracao}`);
+      }
+      if (entrada.animacao) {
+        if (!ANIMACOES_INTRO.includes(entrada.animacao)) return `Não conheço a animação "${entrada.animacao}".`;
+        projeto.intro.animacao = entrada.animacao;
+        mudou.push(`animacao=${entrada.animacao}`);
+      }
+      if (typeof entrada.headline === 'boolean') {
+        projeto.intro.headline = entrada.headline;
+        mudou.push(`headline=${entrada.headline}`);
+      }
+      return mudou.length ? `Intro: ${mudou.join(', ')}.` : 'Nada mudou: nenhum campo veio no pedido.';
+    }
+
+    case 'tirar_intro': {
+      if (!projeto.intro) return 'Já não há intro.';
+      if (projeto.intro.arquivo) {
+        try {
+          fs.rmSync(path.join(caminhoProjeto(projeto.nome), projeto.intro.arquivo), { force: true });
+        } catch { /* arquivo ja sumiu — nao trava a remocao do campo */ }
+      }
+      delete projeto.intro;
+      return 'Intro removida.';
+    }
+
+    case 'configurar_legenda': {
+      const erros = validarConfigLegenda(entrada);
+      if (erros.length) return `Não consegui configurar: ${erros.join('; ')}`;
+      const patch = {};
+      for (const campo of ['posicao', 'escala', 'alinhamento', 'maiusculas', 'antecedencia', 'maxPalavras']) {
+        if (entrada[campo] !== undefined) patch[campo] = entrada[campo];
+      }
+      if (!Object.keys(patch).length) return 'Nada mudou: nenhum campo veio no pedido.';
+      projeto.estilo.legenda = { ...(projeto.estilo.legenda || {}), ...patch };
+      return `Legenda: ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(', ')}.`;
+    }
+
+    case 'destacar_palavras': {
+      const alvo = (entrada.palavras || []).map((s) => String(s));
+      if (!alvo.length) return 'Preciso de ao menos uma palavra.';
+      const normalizar = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      const setAlvo = new Set(alvo.map(normalizar));
+      let marcadas = 0;
+      for (const c of projeto.fase1?.clipes || []) {
+        for (const p of c.palavras || []) {
+          const limpo = normalizar(p.texto.replace(/[.,!?;:]+$/, ''));
+          if (setAlvo.has(limpo)) { p.destaque = true; marcadas++; } else if (entrada.substituir) p.destaque = false;
+        }
+      }
+      return marcadas
+        ? `Destaquei ${marcadas} palavra(s): ${alvo.join(', ')}.`
+        : `Não achei nenhuma dessas palavras no corte: ${alvo.join(', ')}.`;
+    }
+
+    case 'editar_palavra': {
+      try {
+        const p = editarPalavra(projeto.fase1?.clipes || [], entrada);
+        return `Palavra ${entrada.indice} do clipe ${entrada.clipe}: "${p.texto}"${p.oculta ? ' (oculta)' : ''}.`;
+      } catch (e) {
+        return `Não consegui editar: ${e.message}`;
+      }
+    }
+
+    case 'exportar_legenda': {
+      const formato = entrada.formato === 'ass' ? 'ass' : 'srt';
+      const conteudo = formato === 'srt'
+        ? gerarSrt(projeto.fase1?.clipes || [], projeto.estilo || {})
+        : gerarAss(projeto.fase1?.clipes || [], projeto.estilo || {}, projeto.saida);
+      fs.writeFileSync(path.join(caminhoProjeto(projeto.nome), `legenda.${formato}`), conteudo);
+      return `Exportei a legenda em legenda.${formato}.`;
+    }
 
     default:
       return `Ferramenta desconhecida: ${nome}`;
@@ -402,6 +640,19 @@ export function situacao(projeto) {
     const ajustesTexto = ajustesFora.map(([k, v]) => `${k}=${v}`).join(', ') || 'nenhum';
     linhas.push(`Cor: LUT ${nomeLut}, ajustes ${ajustesTexto}`);
   }
-  if (projeto.intro?.arquivo) linhas.push(`Intro: ${projeto.intro.arquivo}`);
+  if (e.transicao?.tipo && e.transicao.tipo !== 'corte') {
+    linhas.push(`Transição: ${e.transicao.tipo}`);
+  }
+  const efeitosLigados = Object.entries(e.efeitos || {}).filter(([, v]) => v);
+  if (efeitosLigados.length) {
+    linhas.push(`Efeitos: ${efeitosLigados.map(([k, v]) => (v === true ? k : `${k}=${JSON.stringify(v)}`)).join(', ')}`);
+  }
+  if (projeto.intro?.arquivo) {
+    linhas.push(`Intro: ${projeto.intro.arquivo} (${projeto.intro.tipo}, ${projeto.intro.duracao}s`
+      + `${projeto.intro.animacao ? `, ${projeto.intro.animacao}` : ''})`);
+  }
+  if (e.legenda && Object.keys(e.legenda).length) {
+    linhas.push(`Legenda (override sobre o preset): ${Object.entries(e.legenda).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+  }
   return linhas.join('\n');
 }
