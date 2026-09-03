@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { agruparEmFalas, marcarDescartes, classificarBlocos, corteOrganico } from './corte.js';
+import {
+  agruparEmFalas, marcarDescartes, classificarBlocos, corteOrganico, marcarDestaques,
+} from './corte.js';
 
 /** Helper: monta palavras a partir de "texto@inicio-fim". */
 const p = (texto, inicio, fim) => ({ texto, inicio, fim });
@@ -100,6 +102,49 @@ test('corta pelo silencio real quando o Whisper nao devolve pontuacao', () => {
   assert.ok(comSilencio.length > semSilencio.length,
     `o silencio deveria gerar mais falas (${comSilencio.length} vs ${semSilencio.length})`);
   assert.ok(comSilencio.length >= 3, `esperava 3+ falas, veio ${comSilencio.length}`);
+});
+
+test('marcarDestaques marca numero/R$, verbo de promessa, negacao forte, caixa alta e nome proprio', () => {
+  const palavras = [
+    p('Você', 0, 0.2), p('vai', 0.2, 0.4), p('faturar', 0.4, 0.8), p('R$', 0.8, 1.0),
+    p('10', 1.0, 1.2), p('mil', 1.2, 1.4), p('e', 1.4, 1.5), p('nunca', 1.5, 1.8),
+    p('mais', 1.8, 2.0), p('vai', 2.0, 2.2), p('parar.', 2.2, 2.6),
+    p('É', 2.7, 2.8), p('SÉRIO', 2.8, 3.2), p('mesmo,', 3.2, 3.6),
+    p('pergunta', 3.7, 4.1), p('pro', 4.1, 4.3), p('Mateus', 4.3, 4.7), p('ali.', 4.7, 5.0),
+  ];
+  const marcadas = marcarDestaques(palavras);
+  assert.ok(marcadas.every((m) => 'destaque' in m), 'toda palavra sai com o campo destaque');
+
+  const destacada = (texto) => marcadas.find((m) => m.texto === texto)?.destaque;
+  assert.equal(destacada('faturar'), true, 'verbo de promessa deveria ser destaque');
+  assert.equal(destacada('R$'), true, 'R$ deveria ser destaque');
+  assert.equal(destacada('nunca'), true, 'negação forte deveria ser destaque');
+  assert.equal(destacada('SÉRIO'), true, 'caixa alta deveria ser destaque');
+  assert.equal(destacada('Mateus'), true, 'nome próprio deveria ser destaque');
+});
+
+test('marcarDestaques marca no máximo 2 por bloco de ~4 palavras', () => {
+  // Cinco candidatos seguidos (todos caixa alta) num bloco de 4 — so 2 saem marcados.
+  const palavras = ['UM', 'DOIS', 'TRES', 'QUATRO'].map((t, i) => p(t, i, i + 0.5));
+  const marcadas = marcarDestaques(palavras);
+  assert.equal(marcadas.filter((m) => m.destaque).length, 2);
+});
+
+test('marcarDestaques não marca maiúscula de início de frase como nome próprio', () => {
+  const palavras = [p('Hoje', 0, 0.3), p('vai', 0.3, 0.5), p('chover', 0.5, 0.9), p('aqui.', 0.9, 1.2)];
+  const marcadas = marcarDestaques(palavras);
+  assert.equal(marcadas.find((m) => m.texto === 'Hoje').destaque, false);
+});
+
+test('corteOrganico já sai com palavras[].destaque marcado', () => {
+  const palavras = [
+    p('Você', 0, 0.3), p('vai', 0.3, 0.6), p('faturar', 0.6, 1.0), p('muito.', 1.0, 1.4),
+  ];
+  const r = corteOrganico(palavras, 2);
+  const todasAsPalavras = r.clipes.flatMap((c) => c.palavras);
+  assert.ok(todasAsPalavras.length > 0);
+  assert.ok(todasAsPalavras.every((w) => typeof w.destaque === 'boolean'));
+  assert.ok(todasAsPalavras.some((w) => w.destaque === true), 'faturar deveria sair marcado');
 });
 
 test('fala longa sem pontuacao nem silencio ainda assim e quebrada', () => {

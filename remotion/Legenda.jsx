@@ -1,73 +1,95 @@
+import { useMemo } from 'react';
 import { acharLegenda } from '../src/shared/presets.js';
+import {
+  agruparBlocos, agrupamentoDoPreset, estadoEm, estiloBloco, estiloPalavra, emojiDoBloco,
+} from '../src/shared/legenda-motor.js';
 
 /**
- * Legenda: karaoke por frase, por palavra, ou acumulando conforme a fala.
+ * Legenda: agrupa as palavras do clipe em blocos (legenda-motor.js) e
+ * anima entrada do bloco e palavra corrente.
  *
- * O contrato do preset (`src/shared/presets.js`) e o mesmo que alimenta a
- * amostra animada da aba Estilo (`public/amostra-legenda.js`) — se muda aqui,
- * muda la, e essa e a razao de tudo derivar do mesmo objeto de preset.
+ * O motor (`src/shared/legenda-motor.js`) e o mesmo que alimenta a amostra
+ * animada da aba Estilo (`public/amostra-legenda.js`) — se muda aqui, muda
+ * la, e essa e a razao de o card ser igual ao video "por construcao".
  */
 export function Legenda({ clipe, t, estilo, cor, altura }) {
   const preset = acharLegenda(estilo.estiloLegenda);
-  if (preset.modo === 'nenhum' || !clipe?.palavras?.length) return null;
+  const palavras = clipe?.palavras;
 
-  const base = preset.base(cor);
-  const ativo = preset.ativo(cor);
-  const passado = preset.passado ? preset.passado(cor) : {};
-  const futuro = preset.futuro ? preset.futuro(cor) : {};
+  const blocos = useMemo(() => {
+    if (preset.modo === 'nenhum' || !palavras?.length) return [];
+    return agruparBlocos(palavras, { ...agrupamentoDoPreset(preset), pausaMax: 0.6 });
+  }, [preset, palavras]);
+
+  if (!blocos.length) return null;
+
+  const estado = estadoEm(blocos, t);
+  if (!estado) return null;
+
+  const {
+    bloco, dtBloco, indiceAtiva, dtPalavra, progressoPalavra,
+  } = estado;
   const corpo = Math.round(altura * 0.032 * (preset.escala || 1));
   const fundoLinha = preset.fundoLinha ? preset.fundoLinha(cor) : null;
+  const entrada = estiloBloco(preset, { dtBloco, cor });
+  const emoji = preset.emoji ? emojiDoBloco(bloco) : null;
 
-  // `fundoLinha` (faixa, bolha) precisa hugar so o texto, entao vira um
-  // wrapper `inline-block` dentro do container — que continua largo (8% a
+  // `fundoLinha` (faixa, bolha, moldura) precisa hugar so o texto, entao vira
+  // um wrapper `inline-block` dentro do container — que continua largo (8% a
   // 92%) e centralizado, so ele que da o tamanho da caixa.
   const envolver = (filhos) => (fundoLinha
     ? <span style={{ display: 'inline-block', ...fundoLinha }}>{filhos}</span>
     : filhos);
 
-  const estiloPalavra = (w, dentroDaAtiva) => {
-    if (dentroDaAtiva) {
-      return preset.transformAtivo
-        ? { ...ativo, display: 'inline-block', transform: preset.transformAtivo }
-        : ativo;
+  const palavraSpan = (idx, comEspaco) => {
+    const w = bloco.palavras[idx];
+    const estadoPalavra = idx < indiceAtiva ? 'passada' : idx > indiceAtiva ? 'futura' : 'ativa';
+    const ehAtiva = estadoPalavra === 'ativa';
+    const dtP = ehAtiva ? dtPalavra : 0;
+    const progresso = ehAtiva ? progressoPalavra : (estadoPalavra === 'passada' ? 1 : 0);
+    const espaco = comEspaco ? ' ' : '';
+
+    // 'onda' anima letra por letra, defasada — so faz sentido pra palavra
+    // que esta soando agora (as outras nao tem um `dt` corrente).
+    if (ehAtiva && preset.ativa === 'onda') {
+      return (
+        <span key={idx}>
+          {espaco}
+          {[...w.texto].map((letra, li) => (
+            <span
+              key={li}
+              style={estiloPalavra(preset, {
+                estado: estadoPalavra, destaque: w.destaque, dtPalavra: dtP, progresso, cor, indiceLetra: li,
+              })}
+            >
+              {letra}
+            </span>
+          ))}
+        </span>
+      );
     }
-    if (t < w.inicio) {
-      // No modo acumula a palavra que ainda nao foi dita fica invisivel, mas
-      // continua ocupando o lugar dela — e assim que o "surge conforme fala"
-      // nao empurra o resto da janela.
-      return preset.modo === 'acumula' ? { visibility: 'hidden' } : futuro;
-    }
-    return passado;
+
+    const est = estiloPalavra(preset, {
+      estado: estadoPalavra, destaque: w.destaque, dtPalavra: dtP, progresso, cor,
+    });
+    // O separador fica FORA do span animado: `pop`/`bounce`/`caixa`/`tremor`
+    // viram `display: inline-block`, e um espaco de abertura dentro de um
+    // inline-block e engolido pelo navegador — o vao some entre as palavras.
+    return <span key={idx}>{espaco}<span style={est}>{w.texto}</span></span>;
   };
 
-  if (preset.modo === 'palavra') {
-    const p = clipe.palavras.find((w) => t >= w.inicio && t < w.fim);
-    if (!p) return null;
-    return (
-      <div style={{ ...caixaLegenda(altura, preset), fontSize: corpo, ...base }}>
-        {envolver(p.texto)}
-      </div>
-    );
-  }
-
-  // Modo frase ou acumula: mostra uma janela de palavras e pinta a que esta
-  // soando. A mesma janela do preset alimenta a amostra animada da aba Estilo.
-  const idx = clipe.palavras.findIndex((w) => t >= w.inicio && t < w.fim);
-  if (idx < 0) return null;
-  const janela = preset.janela || 4;
-  const inicio = Math.floor(idx / janela) * janela;
-  const pedaco = clipe.palavras.slice(inicio, inicio + janela);
+  const conteudo = bloco.linhas.map((linha, li) => (
+    <span key={li} style={{ display: 'block' }}>
+      {linha.map((idx, k) => palavraSpan(idx, k > 0))}
+    </span>
+  ));
 
   return (
-    <div style={{ ...caixaLegenda(altura, preset), fontSize: corpo, ...base }}>
-      {envolver(pedaco.map((w, i) => {
-        const soando = t >= w.inicio && t < w.fim;
-        return (
-          <span key={`${w.inicio}-${i}`} style={estiloPalavra(w, soando)}>
-            {w.texto}{i < pedaco.length - 1 ? ' ' : ''}
-          </span>
-        );
-      }))}
+    <div style={{
+      ...caixaLegenda(altura, preset), fontSize: corpo, ...preset.base(cor), ...entrada,
+    }}
+    >
+      {envolver(<>{conteudo}{emoji ? ` ${emoji}` : ''}</>)}
     </div>
   );
 }

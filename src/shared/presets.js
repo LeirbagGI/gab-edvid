@@ -83,15 +83,27 @@ export const HEADLINES = [
  *
  * Campos opcionais, todos com default que reproduz o comportamento de antes:
  *   passado(cor)    — estilo da palavra ja dita dentro da janela (default nenhum)
- *   futuro(cor)     — estilo da palavra que ainda vai soar (default nenhum;
- *                     ignorado no modo `acumula`, que usa `visibility: hidden`)
- *   transformAtivo  — `transform` CSS so da palavra atual, ex. 'scale(1.12)'
- *                     (aplica `display: inline-block` para o transform valer)
- *   fundoLinha(cor) — estilo do container da linha inteira (faixa, bolha);
- *                     vira um `inline-block` que huga so o texto
+ *   futuro(cor)     — estilo da palavra que ainda vai soar (default nenhum)
+ *   fundoLinha(cor) — estilo do container da linha inteira (faixa, bolha,
+ *                     moldura); vira um `inline-block` que huga so o texto
  *   maiusculas      — true aplica `textTransform: uppercase` no container
  *   posicao         — 'baixo' (default, bottom 17%) | 'meio' (centralizada) |
  *                     'alto' (top 30%)
+ *
+ * Campos do motor (src/shared/legenda-motor.js), so nos 20 estilos novos —
+ * os 9 + 5 antigos acima nao tem, e o motor cai em 'nenhuma' pra eles, que e
+ * o que reproduz o comportamento de antes:
+ *   entrada          — animacao do BLOCO ao entrar: 'nenhuma' | 'pop' | 'sobe' |
+ *                       'desfoque' | 'fade'
+ *   ativa             — animacao da PALAVRA corrente: 'nenhuma' | 'pop' | 'bounce' |
+ *                       'preenche' | 'brilho' | 'tremor' | 'onda' | 'caixa'
+ *   destaque(cor)     — estilo extra so da palavra-chave (numero, R$/%, verbo
+ *                       de promessa, negacao forte, nome proprio — heuristica
+ *                       em src/fase1/corte.js:marcarDestaques)
+ *   agrupamento       — { maxPalavras, maxChars } quando difere do default
+ *                       do motor (4 palavras, 15 caracteres, 2 linhas)
+ *   emoji             — true so no preset `emoji`: acrescenta o emoji do
+ *                       bloco (legenda-motor.js:emojiDoBloco) no fim
  */
 export const LEGENDAS = [
   {
@@ -185,48 +197,14 @@ export const LEGENDAS = [
     ativo: () => ({}),
   },
 
-  /* ------------------------------------------------------- 16 estilos novos */
-  {
-    id: 'neon', nome: 'Neon', modo: 'frase', janela: 3,
-    amostra: 'É assim que',
-    base: (cor) => ({
-      fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 800, color: '#fff',
-      textShadow: `0 0 .12em ${cor}, 0 0 .3em ${cor}, 0 0 .6em ${cor}`,
-    }),
-    ativo: (cor) => ({ color: cor, textShadow: '0 0 .12em #fff, 0 0 .3em #fff, 0 0 .6em #fff' }),
-  },
-  {
-    id: 'maquina', nome: 'Máquina de escrever', modo: 'acumula', janela: 5,
-    amostra: 'É assim que sua',
-    base: () => ({
-      fontFamily: 'Inter, -apple-system, sans-serif', fontWeight: 800,
-      color: '#fff', textShadow: '0 .12em .3em rgba(0,0,0,.85)',
-    }),
-    ativo: (cor) => ({ color: '#fff', borderRight: `.08em solid ${cor}` }),
-  },
-  {
-    id: 'pop', nome: 'Pop', modo: 'frase', janela: 3,
-    amostra: 'É assim que',
-    maiusculas: true,
-    base: () => ({
-      fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 900,
-      color: '#fff', textShadow: '0 .1em .3em rgba(0,0,0,.85)',
-    }),
-    transformAtivo: 'scale(1.18)',
-    ativo: (cor) => ({ color: cor, textShadow: contorno(3) }),
-  },
-  {
-    id: 'caixa-preta', nome: 'Caixa preta', modo: 'frase', janela: 4,
-    amostra: 'É assim que sua',
-    base: () => ({
-      fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 800,
-      color: '#fff', textShadow: contorno(3),
-    }),
-    ativo: (cor) => ({
-      color: cor, background: '#111', borderRadius: '.16em',
-      padding: '.02em .16em', boxDecorationBreak: 'clone',
-    }),
-  },
+  /* ------------------------------------------------------------------------
+   * 5 dos 16 genericos que ficaram (os outros 11 — neon, maquina, pop,
+   * caixa-preta, sublinhada, sombra-dura, hormozi/Impacto, discreta, serif,
+   * duas-cores, contorno-cor — saem: a pesquisa de mercado (02/09) nao achou
+   * referencia real pra eles, e o `hormozi` novo abaixo toma o id de volta
+   * com o estilo que o mercado realmente chama assim). Ficam so os que tem
+   * efeito visual que os 20 novos nao cobrem.
+   * ------------------------------------------------------------------------ */
   {
     id: 'gradiente', nome: 'Gradiente', modo: 'frase', janela: 3,
     amostra: 'É assim que',
@@ -236,55 +214,6 @@ export const LEGENDAS = [
       WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
     }),
     ativo: () => ({ color: '#fff' }),
-  },
-  {
-    id: 'sublinhada', nome: 'Sublinhada', modo: 'frase', janela: 4,
-    amostra: 'É assim que sua',
-    base: () => ({
-      fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 800,
-      color: '#fff', textShadow: '0 .1em .3em rgba(0,0,0,.85)',
-    }),
-    ativo: (cor) => ({ borderBottom: `.12em solid ${cor}`, paddingBottom: '.02em' }),
-  },
-  {
-    id: 'sombra-dura', nome: 'Sombra dura', modo: 'frase', janela: 3,
-    amostra: 'É assim que',
-    maiusculas: true,
-    base: (cor) => ({
-      fontFamily: 'Anton, Impact, sans-serif', fontWeight: 400, color: '#fff',
-      textShadow: `.06em .06em 0 ${cor}, .12em .12em 0 #000`,
-    }),
-    ativo: (cor) => ({ color: cor, textShadow: '.06em .06em 0 #000' }),
-  },
-  {
-    id: 'hormozi', nome: 'Impacto', modo: 'frase', janela: 3,
-    amostra: 'É assim que',
-    maiusculas: true, escala: 1.25,
-    base: () => ({
-      fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 900,
-      color: '#F5C518', textShadow: contorno(4),
-    }),
-    transformAtivo: 'scale(1.1)',
-    ativo: () => ({ color: '#25C26E' }),
-  },
-  {
-    id: 'discreta', nome: 'Discreta', modo: 'frase', janela: 6,
-    amostra: 'É assim que sua legenda irá',
-    escala: 0.8, posicao: 'baixo',
-    base: () => ({
-      fontFamily: 'Inter, -apple-system, sans-serif', fontWeight: 500,
-      color: '#e6e9f0', textShadow: '0 .08em .2em rgba(0,0,0,.6)',
-    }),
-    ativo: () => ({}),
-  },
-  {
-    id: 'serif', nome: 'Editorial', modo: 'frase', janela: 3,
-    amostra: 'É assim que',
-    base: () => ({
-      fontFamily: '"Playfair Display", Georgia, serif', fontWeight: 700, fontStyle: 'italic',
-      color: '#fff', textShadow: '0 .1em .3em rgba(0,0,0,.85)',
-    }),
-    ativo: (cor) => ({ color: cor }),
   },
   {
     id: 'bolha', nome: 'Bolha', modo: 'frase', janela: 4,
@@ -312,15 +241,6 @@ export const LEGENDAS = [
     ativo: (cor) => ({ color: cor, textShadow: 'none' }),
   },
   {
-    id: 'duas-cores', nome: 'Duas cores', modo: 'frase', janela: 4,
-    amostra: 'É assim que sua',
-    maiusculas: true, escala: 1.15,
-    base: () => ({ fontFamily: '"Bebas Neue", Anton, sans-serif', fontWeight: 400, color: '#fff' }),
-    passado: () => ({ color: '#fff' }),
-    futuro: () => ({ color: '#8494b0' }),
-    ativo: (cor) => ({ color: cor }),
-  },
-  {
     id: 'esmaecida', nome: 'Esmaecida', modo: 'frase', janela: 5,
     amostra: 'É assim que sua legenda',
     base: () => ({ fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 700, color: '#fff' }),
@@ -328,14 +248,229 @@ export const LEGENDAS = [
     futuro: () => ({ opacity: .75 }),
     ativo: (cor) => ({ color: '#fff', opacity: 1, textShadow: contorno(2, cor) }),
   },
+
+  /* ------------------------------------------------------------------------
+   * 20 estilos novos — catalogo final da pesquisa de mercado (02/09), tabela
+   * completa em ../../../docs/planejamento/legendas-referencia.md. Cada um
+   * ganha `entrada` (animacao do bloco) e `ativa` (animacao da palavra
+   * corrente), lidos pelo motor em legenda-motor.js — sem eles (os 9 + 5
+   * antigos acima), o motor cai em 'nenhuma' e o resultado fica igual ao
+   * de antes.
+   * ------------------------------------------------------------------------ */
   {
-    id: 'contorno-cor', nome: 'Contorno na cor', modo: 'frase', janela: 3,
-    amostra: 'É assim que',
+    id: 'hormozi', nome: 'Hormozi', maiusculas: true,
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'pop', ativa: 'pop',
+    base: () => ({
+      fontFamily: 'Anton, Impact, sans-serif', fontWeight: 400,
+      color: '#fff', textShadow: contorno(4),
+    }),
+    ativo: () => ({ color: '#FFD700' }),
+    destaque: () => ({ color: '#FFD700' }),
+  },
+  {
+    id: 'beast', nome: 'Beast', maiusculas: true, escala: 1.2,
+    agrupamento: { maxPalavras: 2 },
+    entrada: 'pop', ativa: 'bounce',
+    base: () => ({
+      fontFamily: 'Anton, Impact, sans-serif', fontWeight: 400,
+      color: '#fff', textShadow: contorno(3.5),
+    }),
+    ativo: () => ({ color: '#FF6600' }),
+    destaque: () => ({ color: '#FF6600' }),
+  },
+  {
+    id: 'karaoke-preenche', nome: 'Karaokê preenchida',
+    agrupamento: { maxPalavras: 4 },
+    entrada: 'nenhuma', ativa: 'preenche',
+    base: () => ({
+      fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 800,
+      color: '#fff', textShadow: '0 .1em .3em rgba(0,0,0,.85)',
+    }),
+    ativo: () => ({}),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'caixa-viaja', nome: 'Caixa viajante',
+    agrupamento: { maxPalavras: 4 },
+    entrada: 'sobe', ativa: 'caixa',
+    base: () => ({
+      fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 700,
+      color: '#fff', textShadow: '0 .1em .25em rgba(0,0,0,.8)',
+    }),
+    ativo: () => ({}),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'pop-palavra', nome: 'Pop palavra a palavra', maiusculas: true, escala: 1.5,
+    agrupamento: { maxPalavras: 1 },
+    entrada: 'nenhuma', ativa: 'pop',
+    base: () => ({
+      fontFamily: 'Anton, Impact, sans-serif', fontWeight: 400,
+      color: '#fff', textShadow: contorno(3.5),
+    }),
+    ativo: () => ({}),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'premium', nome: 'Premium',
+    agrupamento: { maxPalavras: 4 },
+    entrada: 'fade', ativa: 'nenhuma',
+    base: () => ({
+      fontFamily: 'Inter, -apple-system, sans-serif', fontWeight: 500,
+      color: 'rgba(255,255,255,.92)', textShadow: '0 .05em .16em rgba(0,0,0,.5)',
+    }),
+    ativo: () => ({ color: '#fff' }),
+  },
+  {
+    id: 'peso', nome: 'Peso',
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'fade', ativa: 'nenhuma',
+    base: () => ({ fontFamily: 'Montserrat, Inter, sans-serif', color: '#fff' }),
+    passado: () => ({ fontWeight: 300 }),
+    futuro: () => ({ fontWeight: 300 }),
+    ativo: () => ({ fontWeight: 900 }),
+    destaque: () => ({ fontWeight: 700 }),
+  },
+  {
+    id: 'brilho', nome: 'Brilho',
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'fade', ativa: 'brilho',
+    base: () => ({ fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 800, color: '#fff' }),
+    ativo: (cor) => ({ color: cor }),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'sombra-pop', nome: 'Sombra pop', maiusculas: true,
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'pop', ativa: 'pop',
+    base: () => ({
+      fontFamily: 'Anton, Impact, sans-serif', fontWeight: 400,
+      color: '#fff', textShadow: '.08em .08em 0 #000',
+    }),
+    ativo: (cor) => ({ color: cor }),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'empilhada', nome: 'Empilhada', maiusculas: true, escala: 1.3,
+    // maxChars baixo forca a quebra em 2 linhas quase sempre — a "linha 2
+    // inteira na cor" da referencia vira "a palavra ativa entra na cor" aqui:
+    // colorir só a segunda linha inteira exigiria o motor saber de linha, não
+    // so de palavra, e isso fica de fora do contrato do D1b (ver relatório).
+    agrupamento: { maxPalavras: 4, maxChars: 9 },
+    entrada: 'sobe', ativa: 'nenhuma',
+    base: () => ({ fontFamily: '"Bebas Neue", Anton, sans-serif', fontWeight: 400, color: '#fff' }),
+    ativo: (cor) => ({ color: cor }),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'moldura-ouro', nome: 'Moldura dourada',
+    agrupamento: { maxPalavras: 4 },
+    entrada: 'fade', ativa: 'nenhuma',
+    base: () => ({
+      fontFamily: '"Playfair Display", Georgia, serif', fontWeight: 700, fontStyle: 'italic',
+      color: '#fff',
+    }),
+    ativo: () => ({ color: '#D4AF37' }),
+    destaque: () => ({ color: '#D4AF37' }),
+    fundoLinha: () => ({ border: '.06em solid #D4AF37', borderRadius: '.3em', padding: '.25em .6em' }),
+  },
+  {
+    id: 'primo', nome: 'Números em destaque', maiusculas: true,
+    agrupamento: { maxPalavras: 4 },
+    entrada: 'pop', ativa: 'nenhuma',
+    base: () => ({
+      fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 800,
+      color: '#fff', textShadow: contorno(3),
+    }),
+    ativo: () => ({}),
+    destaque: () => ({ color: '#F5C518', display: 'inline-block', transform: 'scale(1.1)' }),
+  },
+  {
+    id: 'podcast', nome: 'Corte de podcast',
+    agrupamento: { maxPalavras: 4 },
+    entrada: 'fade', ativa: 'nenhuma',
+    base: () => ({
+      fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 700,
+      color: '#fff', textShadow: contorno(2.5),
+    }),
+    ativo: (cor) => ({ color: cor }),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'dark-venda', nome: 'Venda',
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'sobe', ativa: 'nenhuma',
+    base: () => ({ fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 800, color: '#fff' }),
+    ativo: () => ({ color: '#D4AF37' }),
+    destaque: () => ({ color: '#D4AF37' }),
+    fundoLinha: () => ({ background: 'rgba(10,10,10,.75)', padding: '.2em .5em', borderRadius: '.16em' }),
+  },
+  {
+    id: 'emoji', nome: 'Emoji', emoji: true,
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'pop', ativa: 'pop',
+    base: () => ({
+      fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 700,
+      color: '#fff', textShadow: contorno(2.5),
+    }),
+    ativo: (cor) => ({ color: cor }),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'onda', nome: 'Onda',
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'fade', ativa: 'onda',
+    base: () => ({ fontFamily: 'Montserrat, Inter, sans-serif', fontWeight: 800, color: '#fff' }),
+    ativo: (cor) => ({ color: cor }),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'desfoque', nome: 'Desfoque',
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'desfoque', ativa: 'nenhuma',
+    base: () => ({
+      fontFamily: 'Inter, -apple-system, sans-serif', fontWeight: 800,
+      color: '#fff', textShadow: '0 .08em .22em rgba(0,0,0,.6)',
+    }),
+    ativo: (cor) => ({ color: cor }),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'tremor', nome: 'Tremor', maiusculas: true,
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'pop', ativa: 'tremor',
+    base: () => ({
+      fontFamily: 'Anton, Impact, sans-serif', fontWeight: 400,
+      color: '#fff', textShadow: contorno(3),
+    }),
+    ativo: (cor) => ({ color: cor }),
+    destaque: (cor) => ({ color: cor }),
+  },
+  {
+    id: 'contorno-vivo', nome: 'Contorno vivo',
+    agrupamento: { maxPalavras: 3 },
+    entrada: 'nenhuma', ativa: 'nenhuma',
+    // `WebkitTextStroke` fino (nao a pilha de text-shadow do helper `contorno`,
+    // grossa demais pra virar um contorno oco — em texto transparente ela so
+    // enche a letra) e o jeito certo de um contorno oco de verdade.
     base: (cor) => ({
       fontFamily: 'Poppins, Montserrat, sans-serif', fontWeight: 800,
-      color: '#fff', textShadow: contorno(3, cor),
+      color: 'transparent', WebkitTextStroke: `1.5px ${cor}`,
     }),
-    ativo: (cor) => ({ color: cor, textShadow: contorno(3, '#fff') }),
+    ativo: () => ({ color: '#fff', WebkitTextStroke: '0' }),
+    destaque: (cor) => ({ color: cor, WebkitTextStroke: '0' }),
+  },
+  {
+    id: 'marcal', nome: 'Impacto total', maiusculas: true, escala: 1.35,
+    agrupamento: { maxPalavras: 2 },
+    entrada: 'pop', ativa: 'pop',
+    base: () => ({
+      fontFamily: 'Anton, Impact, sans-serif', fontWeight: 400, color: '#fff',
+      textShadow: `${contorno(5)}, .1em .1em .12em rgba(0,0,0,.6)`,
+    }),
+    ativo: () => ({ color: '#E5352B' }),
+    destaque: () => ({ color: '#E5352B' }),
   },
 ];
 

@@ -5,7 +5,7 @@
   "scripts": {
     "edvid": "node src/cli.js",
     "preview": "node src/server/index.js",
-    "teste": "node --test src/fase1/corte.test.js src/server/fila.test.js src/server/cota.test.js src/server/mcp.test.js src/server/cerebro.test.js src/server/upload.test.js src/interface/interface.test.js src/shared/exec.test.js src/shared/cor.test.js src/shared/presets.test.js src/shared/preview.test.js"
+    "teste": "node --test src/fase1/corte.test.js src/server/fila.test.js src/server/cota.test.js src/server/mcp.test.js src/server/cerebro.test.js src/server/upload.test.js src/interface/interface.test.js src/shared/exec.test.js src/shared/cor.test.js src/shared/presets.test.js src/shared/preview.test.js src/shared/efeitos.test.js src/shared/legenda-motor.test.js"
   },
   "keywords": [],
   "author": "",

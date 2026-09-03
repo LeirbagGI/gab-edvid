@@ -69,6 +69,57 @@ export function agruparEmFalas(palavras, {
   }));
 }
 
+const NORMALIZAR = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+const FORMAS_PROMESSA = new Set([
+  'ganhar', 'ganha', 'ganho', 'ganhando', 'ganhei', 'ganharam',
+  'dobrar', 'dobra', 'dobro', 'dobrando', 'dobrou', 'dobraram',
+  'vender', 'vende', 'vendo', 'vendendo', 'vendeu', 'venderam',
+  'faturar', 'fatura', 'faturo', 'faturando', 'faturou', 'faturaram', 'faturamento',
+  'crescer', 'cresce', 'cresco', 'crescendo', 'cresceu', 'cresceram',
+  'parar', 'para', 'paro', 'parando', 'parou', 'pararam',
+  'perder', 'perde', 'perco', 'perdendo', 'perdeu', 'perderam',
+  'multiplicar', 'multiplica', 'multiplico', 'multiplicando', 'multiplicou', 'multiplicaram',
+  'economizar', 'economiza', 'economizo', 'economizando', 'economizou', 'economizaram',
+]);
+
+const NEGACOES_FORTES = new Set(['nunca', 'nada', 'ninguem', 'jamais']);
+
+/**
+ * Marca `destaque: true` em no maximo `maxPorBloco` palavras a cada
+ * `tamanhoBloco` palavras (~4, o tamanho tipico de um bloco de legenda):
+ * numeros e R$/%, verbos de promessa, negacoes fortes, caixa alta na
+ * transcricao, e nomes proprios (maiuscula inicial fora de comeco de frase).
+ * Heuristica — o Fable pode refinar por cima pela ferramenta `destacar_palavras`.
+ */
+export function marcarDestaques(palavras, { tamanhoBloco = 4, maxPorBloco = 2 } = {}) {
+  const candidatos = palavras.map((p, i) => {
+    const limpo = p.texto.replace(/[.,!?;:]+$/, '');
+    const norm = NORMALIZAR(limpo).replace(/[^a-z]/g, '');
+    const anteriorFechouFrase = i > 0 && /[.!?]$/.test((palavras[i - 1]?.texto || '').trim());
+
+    let prioridade = 0;
+    if (/\d|r\$|%/.test(NORMALIZAR(limpo))) prioridade = 1;
+    else if (FORMAS_PROMESSA.has(norm)) prioridade = 2;
+    else if (NEGACOES_FORTES.has(norm)) prioridade = 3;
+    else if (/^[A-ZÀ-Ú]{2,}$/.test(limpo)) prioridade = 4;
+    else if (i > 0 && !anteriorFechouFrase && /^[A-ZÀ-Ú][a-zà-ú]+$/.test(limpo)) prioridade = 5;
+
+    return { i, prioridade };
+  });
+
+  const marcados = new Set();
+  for (let inicio = 0; inicio < palavras.length; inicio += tamanhoBloco) {
+    const escolhidos = candidatos.slice(inicio, inicio + tamanhoBloco)
+      .filter((c) => c.prioridade > 0)
+      .sort((a, b) => a.prioridade - b.prioridade)
+      .slice(0, maxPorBloco);
+    for (const c of escolhidos) marcados.add(c.i);
+  }
+
+  return palavras.map((p, i) => ({ ...p, destaque: marcados.has(i) }));
+}
+
 const RUIDO = /^(ah+|eh+|hum+|hm+|uh+|tipo|ne|né|entao|então|assim|ta|tá|é|e)$/i;
 
 /**
@@ -189,7 +240,8 @@ export function classificarBlocos(clipes) {
 
 /** Pipeline completo do corte organico, de palavras cruas para clipes rotulados. */
 export function corteOrganico(palavras, duracaoTotal, silencios = []) {
-  const falas = agruparEmFalas(palavras, { silencios });
+  const comDestaque = marcarDestaques(palavras);
+  const falas = agruparEmFalas(comDestaque, { silencios });
   const marcadas = marcarDescartes(falas);
   const fechadas = fecharBordas(marcadas, duracaoTotal);
   const fundidas = fundirVizinhas(fechadas);
@@ -207,6 +259,7 @@ export function corteOrganico(palavras, duracaoTotal, silencios = []) {
         inicio: Number(p.inicio.toFixed(3)),
         fim: Number(p.fim.toFixed(3)),
         texto: p.texto,
+        destaque: !!p.destaque,
       })),
     })),
     descartados: marcadas.filter((f) => f.descartar).map((f) => ({

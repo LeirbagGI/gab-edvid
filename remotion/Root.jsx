@@ -26,11 +26,18 @@ export const Root = () => (
     calculateMetadata={({ props }) => {
       const p = props.projeto;
       const fps = p.saida?.fps || 30;
+      // Duracao total = intro (se houver) + duracao da Fase 1 + o que cada
+      // `congelar` por clipe estica a apresentacao (o congelar nao muda
+      // `fase1.duracao`, que continua sendo a do arquivo fonte).
+      const clipesAtivos = (p.fase1?.clipes || []).filter((c) => c.ativo !== false);
+      const extraCongelar = clipesAtivos.reduce((s, c) => s + Math.max(0, c.efeitos?.congelar || 0), 0);
+      const introDuracao = p.intro ? (p.intro.duracao || 2.5) : 0;
+      const duracaoTotal = (p.fase1?.duracao || 1) + extraCongelar + introDuracao;
       return {
         fps,
         width: p.saida?.largura || 1080,
         height: p.saida?.altura || 1920,
-        durationInFrames: Math.max(1, Math.round((p.fase1?.duracao || 1) * fps)),
+        durationInFrames: Math.max(1, Math.round(duracaoTotal * fps)),
       };
     }}
   />

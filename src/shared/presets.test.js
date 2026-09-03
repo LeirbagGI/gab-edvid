@@ -9,6 +9,8 @@ const aqui = path.dirname(fileURLToPath(import.meta.url));
 const FONTES = path.join(aqui, '..', '..', 'public', 'fontes');
 
 const MODOS_VALIDOS = ['frase', 'palavra', 'nenhum', 'acumula'];
+const ENTRADAS_VALIDAS = ['nenhuma', 'pop', 'sobe', 'desfoque', 'fade'];
+const ATIVAS_VALIDAS = ['nenhuma', 'pop', 'bounce', 'preenche', 'brilho', 'tremor', 'onda', 'caixa'];
 
 /** "É a família principal" de um valor de font-family CSS: o primeiro nome,
  *  sem aspas — os demais são fallback e não precisam de arquivo (sans-serif,
@@ -28,17 +30,17 @@ const FAMILIA_ARQUIVO = {
   Fredoka: ['Fredoka.ttf'],
 };
 
-test('há 25 legendas, todas com id único', () => {
-  assert.equal(LEGENDAS.length, 25);
+test('há 34 legendas (9 originais + 5 genéricos que ficaram + 20 da referência de mercado), todas com id único', () => {
+  assert.equal(LEGENDAS.length, 34);
   const ids = LEGENDAS.map((l) => l.id);
   assert.equal(new Set(ids).size, ids.length, `ids repetidos: ${ids.join(', ')}`);
 });
 
-test('toda legenda tem nome, modo válido, base() e ativo(cor) retornando objeto', () => {
+test('toda legenda tem nome, modo válido (quando existe), base() e ativo(cor) retornando objeto', () => {
   for (const l of LEGENDAS) {
     assert.equal(typeof l.nome, 'string', `${l.id}: sem nome`);
     assert.ok(l.nome.length > 0, `${l.id}: nome vazio`);
-    assert.ok(MODOS_VALIDOS.includes(l.modo), `${l.id}: modo inválido "${l.modo}"`);
+    if (l.modo !== undefined) assert.ok(MODOS_VALIDOS.includes(l.modo), `${l.id}: modo inválido "${l.modo}"`);
 
     const base = l.base('#EE7533');
     assert.equal(typeof base, 'object', `${l.id}: base() não retornou objeto`);
@@ -50,7 +52,7 @@ test('toda legenda tem nome, modo válido, base() e ativo(cor) retornando objeto
   }
 });
 
-test('os campos opcionais do contrato, quando existem, retornam objeto ou string', () => {
+test('os campos opcionais do contrato antigo, quando existem, retornam objeto ou string', () => {
   for (const l of LEGENDAS) {
     if (l.passado) assert.equal(typeof l.passado('#EE7533'), 'object', `${l.id}: passado(cor)`);
     if (l.futuro) assert.equal(typeof l.futuro('#EE7533'), 'object', `${l.id}: futuro(cor)`);
@@ -64,6 +66,55 @@ test('os campos opcionais do contrato, quando existem, retornam objeto ou string
     if (l.posicao !== undefined) {
       assert.ok(['baixo', 'meio', 'alto'].includes(l.posicao), `${l.id}: posicao inválida "${l.posicao}"`);
     }
+  }
+});
+
+test('toda legenda tem entrada e ativa válidos ou ausentes (o motor cai em "nenhuma")', () => {
+  for (const l of LEGENDAS) {
+    if (l.entrada !== undefined) assert.ok(ENTRADAS_VALIDAS.includes(l.entrada), `${l.id}: entrada inválida "${l.entrada}"`);
+    if (l.ativa !== undefined) assert.ok(ATIVAS_VALIDAS.includes(l.ativa), `${l.id}: ativa inválida "${l.ativa}"`);
+    if (l.destaque) assert.equal(typeof l.destaque('#EE7533'), 'object', `${l.id}: destaque(cor)`);
+    if (l.agrupamento) {
+      if (l.agrupamento.maxPalavras !== undefined) {
+        assert.equal(typeof l.agrupamento.maxPalavras, 'number', `${l.id}: agrupamento.maxPalavras`);
+      }
+      if (l.agrupamento.maxChars !== undefined) {
+        assert.equal(typeof l.agrupamento.maxChars, 'number', `${l.id}: agrupamento.maxChars`);
+      }
+    }
+    if (l.emoji !== undefined) {
+      assert.equal(typeof l.emoji, 'boolean', `${l.id}: emoji não é boolean`);
+      assert.ok(l.emoji === false || l.id === 'emoji', `só o preset "emoji" deveria marcar emoji: true (achado em "${l.id}")`);
+    }
+  }
+});
+
+test('os 9 presets originais e os 5 genéricos mantidos não têm entrada nem ativa (comportamento igual ao de antes)', () => {
+  const semMotor = [
+    'karaoke', 'karaoke-caixa', 'contorno', 'palavra-unica', 'condensada', 'cartoon', 'barra', 'simples', 'sem-legenda',
+    'gradiente', 'bolha', 'fita', 'glitch', 'esmaecida',
+  ];
+  for (const id of semMotor) {
+    const l = LEGENDAS.find((x) => x.id === id);
+    assert.ok(l, `preset "${id}" não existe`);
+    assert.equal(l.entrada, undefined, `${id}: não deveria ter "entrada"`);
+    assert.equal(l.ativa, undefined, `${id}: não deveria ter "ativa"`);
+  }
+});
+
+test('os 20 estilos novos da referência de mercado (02/09) existem, cada um com id esperado', () => {
+  const esperados = [
+    'hormozi', 'beast', 'karaoke-preenche', 'caixa-viaja', 'pop-palavra',
+    'premium', 'peso', 'brilho', 'sombra-pop', 'empilhada', 'moldura-ouro',
+    'primo', 'podcast', 'dark-venda', 'emoji', 'onda', 'desfoque', 'tremor',
+    'contorno-vivo', 'marcal',
+  ];
+  const ids = new Set(LEGENDAS.map((l) => l.id));
+  for (const id of esperados) assert.ok(ids.has(id), `preset "${id}" não existe`);
+  for (const id of esperados) {
+    const l = LEGENDAS.find((x) => x.id === id);
+    assert.ok(l.entrada !== undefined, `${id}: deveria ter "entrada"`);
+    assert.ok(l.ativa !== undefined, `${id}: deveria ter "ativa"`);
   }
 });
 
@@ -89,22 +140,4 @@ test('toda fonte citada em fontFamily das headlines existe em public/fontes/', (
     const existe = arquivos.some((f) => fs.existsSync(path.join(FONTES, f)));
     assert.ok(existe, `${h.id}: nenhum arquivo de "${familia}" encontrado em public/fontes/ (${arquivos.join(', ')})`);
   }
-});
-
-test('as fontes novas do D1 (Inter, Playfair Display, Fredoka) existem depois deste trabalho', () => {
-  for (const familia of ['Inter', 'Playfair Display', 'Fredoka']) {
-    const arquivos = FAMILIA_ARQUIVO[familia];
-    const existe = arquivos.some((f) => fs.existsSync(path.join(FONTES, f)));
-    assert.ok(existe, `"${familia}" ainda não tem arquivo em public/fontes/`);
-  }
-});
-
-test('os 16 estilos novos de legenda existem, cada um com id esperado', () => {
-  const esperados = [
-    'neon', 'maquina', 'pop', 'caixa-preta', 'gradiente', 'sublinhada',
-    'sombra-dura', 'hormozi', 'discreta', 'serif', 'bolha', 'fita',
-    'glitch', 'duas-cores', 'esmaecida', 'contorno-cor',
-  ];
-  const ids = new Set(LEGENDAS.map((l) => l.id));
-  for (const id of esperados) assert.ok(ids.has(id), `preset "${id}" não existe`);
 });
