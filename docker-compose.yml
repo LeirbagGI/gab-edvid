@@ -81,10 +81,11 @@ services:
     volumes:
       - /opt/edvid/dados/modelos-transcritor:/modelos
       - /opt/edvid/dados/cache-transcritor:/cache
-    mem_limit: 2500m
+    mem_limit: 2800m
     cpus: "3"
     environment:
       TRANSCRITOR_MODELO: "large-v3-turbo"
+      TRANSCRITOR_OCIOSO_S: "180"
       TRANSCRITOR_THREADS: "3"
       HF_HOME: "/modelos"
     networks:
