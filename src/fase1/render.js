@@ -57,9 +57,13 @@ export async function renderizarCorte(origem, clipes, destino, { onProgresso, co
 
   // O Mac usa VideoToolbox (hardware); o container Linux nao tem, entao cai
   // para libx264 por software, com preset e qualidade configuraveis por env.
+  // Quadro-chave a cada 0,5 s: o Remotion extrai quadro a quadro deste arquivo
+  // e o navegador arrasta a agulha nele; com o GOP padrao (4 s) cada busca
+  // decodifica ate 120 quadros para achar um.
+  const gop = ['-g', '15', '-keyint_min', '15', '-sc_threshold', '0'];
   const argsVideo = CODEC === 'libx264'
-    ? ['-c:v', 'libx264', '-preset', X264_PRESET, '-crf', String(CRF), '-pix_fmt', 'yuv420p']
-    : ['-c:v', CODEC, '-b:v', '12M'];
+    ? ['-c:v', 'libx264', '-preset', X264_PRESET, '-crf', String(CRF), '-pix_fmt', 'yuv420p', ...gop]
+    : ['-c:v', CODEC, '-b:v', '12M', ...gop];
 
   await ffmpeg([
     '-i', origem,

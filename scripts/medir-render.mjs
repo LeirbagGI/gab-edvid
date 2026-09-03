@@ -149,6 +149,7 @@ async function gerarClipeSintetico(destino) {
     '-f', 'lavfi', '-i', `testsrc2=size=${SAIDA.largura}x${SAIDA.altura}:rate=${SAIDA.fps}:duration=${DURACAO_TOTAL}`,
     '-f', 'lavfi', '-i', `sine=frequency=440:duration=${DURACAO_TOTAL}`,
     '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+    ...(process.env.MEDIR_GOP ? ['-g', process.env.MEDIR_GOP, '-keyint_min', process.env.MEDIR_GOP, '-sc_threshold', '0'] : []),
     '-c:a', 'aac', '-shortest',
     destino,
   ]);
