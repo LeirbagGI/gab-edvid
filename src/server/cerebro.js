@@ -76,6 +76,54 @@ function escolherEsforco(texto) {
   return texto.length < 60 && RE_COMANDO_CURTO.test(texto) ? 'low' : 'medium';
 }
 
+/*
+ * Magnific (geracao por IA: imagem, video, audio, upscale, b-roll de banco)
+ * so entra no MCP da chamada quando o pedido de verdade precisa dele — o
+ * catalogo dele custa 39 mil tokens por sessao, caro demais para carregar em
+ * toda mensagem. So funciona pela ponte-claude (na VPS, autenticado la); no
+ * Mac essa parte fica so implementada e testada com a ponte de mentira.
+ */
+export const RE_MAGNIFIC = /gerar|gera\s|cria(r)?\s+(uma\s+|um\s+)?(imagem|foto|intro|vinheta|trilha|m[uú]sica|efeito|sfx|narra|voz|locu[cç][aã]o)|intro com ia|com ia|magnific|upscale|melhorar a qualidade|stock|b-?roll|imagem de fundo|dublar|dublagem/i;
+
+export const precisaMagnific = (texto) => RE_MAGNIFIC.test(String(texto || ''));
+
+/** As unicas ferramentas do Magnific liberadas — nada de "*", uma por uma. */
+const FERRAMENTAS_MAGNIFIC = [
+  'mcp__magnific__account_balance',
+  'mcp__magnific__images_models_list',
+  'mcp__magnific__images_generate',
+  'mcp__magnific__images_upscale',
+  'mcp__magnific__images_remove_background',
+  'mcp__magnific__images_expand',
+  'mcp__magnific__audio_music_generate',
+  'mcp__magnific__audio_sfx_generate',
+  'mcp__magnific__audio_tts',
+  'mcp__magnific__audio_voices_list',
+  'mcp__magnific__video_models_list',
+  'mcp__magnific__video_generate',
+  'mcp__magnific__video_upscale',
+  'mcp__magnific__stock_search',
+  'mcp__magnific__stock_download',
+  'mcp__magnific__creation_status',
+  'mcp__magnific__creations_wait',
+  'mcp__magnific__creations_get',
+];
+
+const BLOCO_MAGNIFIC = `
+
+Geração por IA (Magnific):
+Isso custa créditos de verdade — só use quando o Gabriel pedir geração por IA (imagem, b-roll,
+intro, trilha, sfx, voz, upscale). Siga esta ordem:
+1. Se for a primeira geração por IA desta sessão, chame account_balance antes de gerar.
+2. Gere no formato certo: imagem 9:16 para b-roll e intro, música com a duração igual à do
+   corte, voz em pt-BR.
+3. Chame creations_wait até a geração terminar.
+4. Pegue a URL do resultado em creations_get.
+5. Chame a ferramenta do Edvid baixar_para_projeto com essa URL e o tipo certo.
+6. Diga o que gerou e quanto custou em créditos.
+Nunca invente URL — use só a que creations_get devolveu. Se a geração falhar, diga o erro, não
+finja que deu certo.`;
+
 /** Ultimas 20 mensagens de texto do chat, formatadas para o histórico. */
 function historicoTexto(projeto) {
   return (projeto.conversa || [])
@@ -138,7 +186,20 @@ async function lerStream(response, aoParcial) {
   return { resultado, erro, acumulado };
 }
 
-async function chamarPonte({ sessao, sistema, mensagem, esforco, urlMcp, aoParcial }) {
+async function chamarPonte({
+  sessao, sistema, mensagem, esforco, urlMcp, aoParcial, usaMagnific,
+}) {
+  const mcp = usaMagnific
+    ? { edvid: { type: 'http', url: urlMcp }, magnific: { type: 'http', url: 'https://mcp.magnific.com' } }
+    : { edvid: { type: 'http', url: urlMcp } };
+  const ferramentasPermitidas = usaMagnific
+    ? ['mcp__edvid__*', ...FERRAMENTAS_MAGNIFIC]
+    : ['mcp__edvid__*'];
+  // O catalogo do Magnific e grande e a geracao demora — mais voltas e mais
+  // tempo so quando ele esta na jogada.
+  const timeoutS = usaMagnific ? 600 : 180;
+  const maxVoltas = usaMagnific ? 12 : 6;
+
   const resposta = await fetch(`${PONTE_URL}/conversar`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -149,12 +210,12 @@ async function chamarPonte({ sessao, sistema, mensagem, esforco, urlMcp, aoParci
       esforco,
       sistema,
       mensagem,
-      mcp: { edvid: { type: 'http', url: urlMcp } },
-      ferramentas_permitidas: ['mcp__edvid__*'],
-      max_voltas: 6,
-      timeout_s: 180,
+      mcp,
+      ferramentas_permitidas: ferramentasPermitidas,
+      max_voltas: maxVoltas,
+      timeout_s: timeoutS,
     }),
-    signal: AbortSignal.timeout(180000),
+    signal: AbortSignal.timeout(timeoutS * 1000),
   });
   if (!resposta.ok) throw new Error(`ponte respondeu ${resposta.status}`);
   return lerStream(resposta, aoParcial);
@@ -177,6 +238,7 @@ export async function conversar(nome, texto, { aoParcial, urlMcp } = {}) {
   // pronto tambem para a tentativa sem --resume, se a sessao for recusada.
   const temSessao = Boolean(projeto.chat?.sessao);
   const historico = historicoTexto(projeto);
+  const usaMagnific = precisaMagnific(texto);
 
   vocediz(projeto, texto);
   // Grava ja: as ferramentas MCP rodam em outro fluxo e recarregam o projeto
@@ -185,8 +247,9 @@ export async function conversar(nome, texto, { aoParcial, urlMcp } = {}) {
   salvar(projeto);
 
   const sistema = `${SISTEMA}\n\nVocê tem ferramentas MCP; use-as para agir. O projeto atual `
-    + 'já está amarrado às ferramentas, não precisa passar o nome dele.';
-  const esforco = escolherEsforco(texto);
+    + 'já está amarrado às ferramentas, não precisa passar o nome dele.'
+    + (usaMagnific ? BLOCO_MAGNIFIC : '');
+  const esforco = usaMagnific ? 'medium' : escolherEsforco(texto);
   const urlEfetiva = urlMcp || `http://127.0.0.1:${PORTA_PREVIEW}/mcp/${encodeURIComponent(nome)}`;
 
   const montarMensagem = () => (temSessao
@@ -204,6 +267,7 @@ export async function conversar(nome, texto, { aoParcial, urlMcp } = {}) {
       esforco,
       urlMcp: urlEfetiva,
       aoParcial,
+      usaMagnific,
     });
   } catch (e) {
     throw new Error(`ponte: ${e.message}`);
@@ -222,6 +286,7 @@ export async function conversar(nome, texto, { aoParcial, urlMcp } = {}) {
       esforco,
       urlMcp: urlEfetiva,
       aoParcial,
+      usaMagnific,
     });
   }
 

@@ -6,6 +6,8 @@ import { extrairWav, transcreverPalavras, detectarSilencios } from './transcreve
 import { corteOrganico, classificarBlocos } from './corte.js';
 import { renderizarCorte, gerarMiniaturas, gerarPicos } from './render.js';
 import { narra, acao, tabelaDoCorte, seg } from '../shared/conversa.js';
+import { corPadrao, AJUSTES_PADRAO } from '../shared/cor.js';
+import { gerarPreview } from '../shared/preview.js';
 
 const ESTADO = 'projeto.json';
 const CORTE_HOOK = 4;
@@ -28,7 +30,14 @@ export function caminhoProjeto(nome) {
 export function carregar(nome) {
   const arq = path.join(caminhoProjeto(nome), ESTADO);
   if (!fs.existsSync(arq)) return null;
-  return JSON.parse(fs.readFileSync(arq, 'utf8'));
+  const projeto = JSON.parse(fs.readFileSync(arq, 'utf8'));
+  // Projeto antigo sem `cor` (ou com campo incompleto) recebe o padrao.
+  projeto.cor = {
+    lut: projeto.cor?.lut ?? null,
+    intensidade: typeof projeto.cor?.intensidade === 'number' ? projeto.cor.intensidade : 1,
+    ajustes: { ...AJUSTES_PADRAO, ...(projeto.cor?.ajustes || {}) },
+  };
+  return projeto;
 }
 
 export function salvar(projeto) {
@@ -77,10 +86,25 @@ export async function refazerCorte(nome, { log = () => {} } = {}) {
   log({ etapa: 'render', msg: `Refazendo o corte com ${ativos.length} clipes` });
   await renderizarCorte(projeto.origem.caminho, ativos, arquivoCorte, {
     onProgresso: (s) => log({ etapa: 'render', msg: 'Renderizando', pct: (s / duracao) * 100 }),
+    cor: projeto.cor,
   });
 
   log({ etapa: 'waveform', msg: 'Redesenhando a waveform' });
   projeto.fase1.picos = await gerarPicos(arquivoCorte);
+
+  // Proxy leve para o player (src/shared/preview.js) — falha aqui nao
+  // derruba a fase, so fica sem preview (o player cai para o arquivo pesado).
+  log({ etapa: 'preview', msg: 'Gerando pré-visualização leve' });
+  const avisosPreview = [];
+  try {
+    await gerarPreview(arquivoCorte, path.join(pasta, 'fase1-preview.mp4'));
+    projeto.fase1.preview = 'fase1-preview.mp4';
+  } catch (e) {
+    delete projeto.fase1.preview; // corte mudou: o preview velho nao serve mais
+    avisosPreview.push(`Pré-visualização não gerada: ${e.message}`);
+  }
+  projeto.fase1.avisos = avisosPreview;
+  projeto.fase1.renderizadoEm = new Date().toISOString();
 
   // Reposiciona os clipes ativos na linha do tempo nova.
   let t = 0;
@@ -183,9 +207,11 @@ export async function rodarFase1(videoOrigem, nome, { log = () => {} } = {}) {
   const arquivoCorte = path.join(pasta, 'fase1-corte.mp4');
   const duracaoFinal = clipes.reduce((s, c) => s + c.duracao, 0);
 
+  const cor = corPadrao();
   log({ etapa: 'render', msg: 'Renderizando o corte' });
   await renderizarCorte(videoOrigem, clipes, arquivoCorte, {
     onProgresso: (s) => log({ etapa: 'render', msg: 'Renderizando', pct: (s / duracaoFinal) * 100 }),
+    cor,
   });
 
   log({ etapa: 'thumbs', msg: 'Gerando miniaturas da timeline' });
@@ -193,6 +219,18 @@ export async function rodarFase1(videoOrigem, nome, { log = () => {} } = {}) {
 
   log({ etapa: 'waveform', msg: 'Desenhando a waveform' });
   const picos = await gerarPicos(arquivoCorte);
+
+  // Proxy leve para o player (src/shared/preview.js) — falha aqui nao
+  // derruba a fase, so fica sem preview (o player cai para o arquivo pesado).
+  log({ etapa: 'preview', msg: 'Gerando pré-visualização leve' });
+  const avisosPreview = [];
+  let preview = null;
+  try {
+    await gerarPreview(arquivoCorte, path.join(pasta, 'fase1-preview.mp4'));
+    preview = 'fase1-preview.mp4';
+  } catch (e) {
+    avisosPreview.push(`Pré-visualização não gerada: ${e.message}`);
+  }
 
   // Recalcula o tempo de cada clipe ja na linha do tempo do corte (nao da origem).
   let t = 0;
@@ -232,8 +270,12 @@ export async function rodarFase1(videoOrigem, nome, { log = () => {} } = {}) {
       clipes: naTimeline,
       descartados,
       picos,
+      renderizadoEm: new Date().toISOString(),
+      avisos: avisosPreview,
+      ...(preview ? { preview } : {}),
     },
     estilo: estiloPadrao(),
+    cor,
     fase2: { status: 'nao-iniciada' },
   };
 

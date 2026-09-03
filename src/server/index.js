@@ -1,18 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import multer from 'multer';
 import { WebSocketServer } from 'ws';
 import { PORTA_PREVIEW, PROJETOS, PASTA_ENTRADA, RE_VIDEO, EXTENSOES, OLLAMA } from '../shared/config.js';
 import { carregar, salvar, listar, caminhoProjeto, nomeLivre } from '../fase1/projeto.js';
+import { quadroComCor } from '../fase1/render.js';
 import { headlinePadrao, lerBroll, lerTrilha } from '../fase2/render.js';
 import { diz } from '../shared/conversa.js';
+import { LUTS, corPadrao, validarCor } from '../shared/cor.js';
+import { gerarPreview } from '../shared/preview.js';
 import { fila } from './fila.js';
 import { interpretar } from './comandos.js';
 import { conversar, temPonte, cota, temCota, MODELO } from './cerebro.js';
 import { conversarLocal, ollamaPronto } from './local.js';
 import { montarMcp } from './mcp.js';
+import * as uploads from './upload.js';
 
 const aqui = path.dirname(fileURLToPath(import.meta.url));
 const PUBLICO = path.join(aqui, '..', '..', 'public');
@@ -56,8 +61,10 @@ app.use(express.static(PUBLICO));
 // Os presets sao compartilhados com o Remotion; o navegador le o mesmo arquivo.
 app.use('/shared', express.static(COMPARTILHADO));
 
-// Midia dos projetos (corte, final, miniaturas, broll).
-app.use('/midia', express.static(PROJETOS));
+// Midia dos projetos (corte, final, miniaturas, broll). Cache de 7 dias: o
+// cliente versiona a URL (`?v=`) quando o arquivo muda, entao servir do
+// cache do navegador nao arrisca mostrar conteudo velho.
+app.use('/midia', express.static(PROJETOS, { maxAge: '7d' }));
 
 /* ------------------------------------------------------------- projetos */
 
@@ -72,9 +79,47 @@ app.get('/api/projetos', (_req, res) => {
   })));
 });
 
+/*
+ * Projetos antigos (de antes do proxy de pre-visualizacao) nao tem
+ * fase1.preview/fase2.preview em disco. Na primeira vez que alguem abre um
+ * desses, gera em segundo plano sem segurar a resposta — o Set evita
+ * disparar duas vezes se o navegador pedir o mesmo projeto de novo antes de
+ * terminar (o proxy de um video de alguns minutos leva alguns segundos).
+ */
+const previewsEmAndamento = new Set();
+
+function agendarPreviewsFaltantes(p) {
+  const pasta = caminhoProjeto(p.nome);
+  const tarefas = [];
+  if (p.fase1?.arquivo && !p.fase1.preview) {
+    tarefas.push({ fase: 'fase1', origem: p.fase1.arquivo, destino: 'fase1-preview.mp4' });
+  }
+  if (p.fase2?.status === 'pronta' && p.fase2?.arquivo && !p.fase2.preview) {
+    tarefas.push({ fase: 'fase2', origem: p.fase2.arquivo, destino: 'fase2-preview.mp4' });
+  }
+  for (const t of tarefas) {
+    const chave = `${p.nome}:${t.fase}`;
+    if (previewsEmAndamento.has(chave)) continue;
+    previewsEmAndamento.add(chave);
+    gerarPreview(path.join(pasta, t.origem), path.join(pasta, t.destino))
+      .then(() => {
+        const atual = carregar(p.nome);
+        if (!atual) return;
+        atual[t.fase] = { ...atual[t.fase], preview: t.destino };
+        salvar(atual);
+        transmitir({ tipo: 'projeto', projeto: atual });
+      })
+      // Projeto antigo so fica sem preview — ninguem esta esperando por isso,
+      // nao ha por que derrubar nada.
+      .catch(() => {})
+      .finally(() => previewsEmAndamento.delete(chave));
+  }
+}
+
 app.get('/api/projeto/:nome', (req, res) => {
   const p = carregar(req.params.nome);
   if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+  agendarPreviewsFaltantes(p);
   p.fase2 = {
     ...p.fase2,
     headlineSugerida: headlinePadrao(p),
@@ -137,6 +182,72 @@ app.patch('/api/projeto/:nome/clipe/:id', (req, res) => {
   salvar(p);
   transmitir({ tipo: 'projeto', projeto: p });
   res.json(c);
+});
+
+/* ------------------------------------------------------------- cor (F1) */
+
+app.get('/api/luts', (_req, res) => res.json(LUTS));
+
+app.put('/api/projeto/:nome/cor', (req, res) => {
+  const p = carregar(req.params.nome);
+  if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+
+  const corpo = req.body || {};
+  const patch = {};
+  if (Object.prototype.hasOwnProperty.call(corpo, 'lut')) patch.lut = corpo.lut;
+  if (Object.prototype.hasOwnProperty.call(corpo, 'intensidade')) patch.intensidade = corpo.intensidade;
+  if (corpo.ajustes) patch.ajustes = corpo.ajustes;
+
+  const { ok, erros } = validarCor(patch);
+  if (!ok) return res.status(400).json({ erro: erros.join('; ') });
+
+  const atual = p.cor || corPadrao();
+  p.cor = {
+    lut: Object.prototype.hasOwnProperty.call(patch, 'lut') ? patch.lut : atual.lut,
+    intensidade: Object.prototype.hasOwnProperty.call(patch, 'intensidade') ? patch.intensidade : atual.intensidade,
+    ajustes: { ...atual.ajustes, ...(patch.ajustes || {}) },
+  };
+  salvar(p);
+  transmitir({ tipo: 'projeto', projeto: p });
+  // Nao re-renderiza sozinho: o corte em disco so muda quando o cliente
+  // manda POST /api/fila/refazer (ou a ferramenta de chat equivalente).
+  res.json({ cor: p.cor, precisaRefazer: true });
+});
+
+// Um quadro do video de ORIGEM (nao do corte) com a cor aplicada, para o
+// antes/depois na aba Cor (F2). Cache em disco por hash da cor+tempo.
+app.get('/api/projeto/:nome/cor/preview', async (req, res) => {
+  try {
+    const p = carregar(req.params.nome);
+    if (!p) return res.status(404).json({ erro: 'projeto nao encontrado' });
+    if (!p.origem?.caminho) return res.status(400).json({ erro: 'projeto sem video de origem' });
+
+    const ativos = (p.fase1?.clipes || []).filter((c) => c.ativo !== false);
+    const primeiro = ativos[0];
+    const tempoDefault = primeiro
+      ? (primeiro.origemInicio + primeiro.origemFim) / 2
+      : (p.origem.duracao || 1) / 2;
+    const t = req.query.t !== undefined ? Number(req.query.t) : tempoDefault;
+    if (!Number.isFinite(t) || t < 0) return res.status(400).json({ erro: 't invalido' });
+
+    const aplicar = req.query.aplicar !== '0';
+    const cor = aplicar ? (p.cor || corPadrao()) : corPadrao();
+
+    const chave = crypto.createHash('sha1')
+      .update(JSON.stringify({ cor, t: Number(t.toFixed(2)) }))
+      .digest('hex')
+      .slice(0, 16);
+    const pastaTrabalho = path.join(caminhoProjeto(p.nome), 'trabalho');
+    fs.mkdirSync(pastaTrabalho, { recursive: true });
+    const destino = path.join(pastaTrabalho, `preview-cor-${chave}.jpg`);
+
+    if (!fs.existsSync(destino)) {
+      await quadroComCor(p.origem.caminho, t, cor, destino);
+    }
+    res.type('jpg').sendFile(destino);
+  } catch (e) {
+    res.status(400).json({ erro: e.message });
+  }
 });
 
 /* ------------------------------------------------------------- fase 2 */
@@ -230,6 +341,59 @@ app.post('/api/fila/:tipo', (req, res) => {
 });
 
 app.delete('/api/fila/:id', (req, res) => res.json({ ok: fila.cancelar(req.params.id) }));
+
+/* ------------------------------------------------------- upload em pedacos */
+
+/*
+ * O Traefik da VPS corta requisicao parada em 60s (readTimeout padrao); um
+ * POST /api/upload de video grande passa disso facil e vira 502 no
+ * navegador. Aqui cada pedaco e uma requisicao curta — a sessao fica em
+ * PASTA_ENTRADA/.parciais/<id>/ (src/server/upload.js) ate finalizar montar
+ * o arquivo inteiro e enfileirar a Fase 1, exatamente como o /api/upload
+ * antigo (que continua existindo, para arquivo pequeno e para a CLI).
+ */
+
+app.post('/api/upload/iniciar', (req, res) => {
+  try {
+    const { nome, tamanho, tipo } = req.body || {};
+    if (!nome || !RE_VIDEO.test(nome)) {
+      return res.status(400).json({ erro: `extensao nao aceita. Use: ${EXTENSOES.join(', ')}` });
+    }
+    res.json(uploads.iniciar({ nome, tamanho, tipo }));
+  } catch (e) {
+    res.status(400).json({ erro: e.message });
+  }
+});
+
+// Corpo binario cru — so nesta rota. `express.json()` la em cima nao mexe
+// aqui porque so parseia quando o content-type e application/json.
+app.put('/api/upload/:id/:indice', express.raw({ type: '*/*', limit: '16mb' }), (req, res) => {
+  try {
+    res.json(uploads.receberPedaco(req.params.id, req.params.indice, req.body));
+  } catch (e) {
+    res.status(400).json({ erro: e.message });
+  }
+});
+
+app.get('/api/upload/:id', (req, res) => {
+  try {
+    res.json(uploads.estado(req.params.id));
+  } catch (e) {
+    res.status(404).json({ erro: e.message });
+  }
+});
+
+app.post('/api/upload/:id/finalizar', (req, res) => {
+  try {
+    const { caminho } = uploads.finalizar(req.params.id);
+    const nome = nomeLivre(path.basename(caminho));
+    const item = fila.enfileirar('fase1', { arquivo: caminho, nome });
+    transmitir({ tipo: 'lista' });
+    res.json({ item, nome });
+  } catch (e) {
+    res.status(400).json({ erro: e.message });
+  }
+});
 
 /* ------------------------------------------------------------- upload */
 
@@ -326,7 +490,18 @@ const servidor = app.listen(PORTA_PREVIEW, () => {
   console.log(`\n  Edvid — preview em http://localhost:${PORTA_PREVIEW}/\n`);
   // Fila persistente (A1): retoma o que ficou pendente de uma queda do servidor.
   if (typeof fila.retomar === 'function') fila.retomar();
+  // Sessao de upload em pedacos abandonada (aba fechada no meio) some sozinha.
+  uploads.limparVelhos(24);
 });
+
+// Sem isto o proprio Node corta a conexao antes do pedaco de upload (ou de
+// qualquer requisicao mais longa) terminar — o timeout do Traefik (60s) e o
+// motivo de existir o upload em pedacos; o do Node nao pode ser outro corte
+// pela mesma razao. `headersTimeout`/`keepAliveTimeout` seguem a folga
+// recomendada pelo proprio Node (> qualquer timeout de proxy na frente).
+servidor.requestTimeout = 0;
+servidor.headersTimeout = 65000;
+servidor.keepAliveTimeout = 65000;
 
 // Sem isto, porta ocupada vira um stack trace do Node e parece que o app quebrou.
 servidor.on('error', (e) => {

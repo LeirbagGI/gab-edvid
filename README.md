@@ -114,6 +114,25 @@ renderizar a Fase 2, mudar estilo, ligar/desligar elemento, ligar/desligar
 clipe e mostrar a tabela do corte. Ele não tem caminho paralelo — faz o mesmo
 que os botões.
 
+### Geração por IA (Magnific) — só quando você pede
+
+O chat também sabe **gerar** coisa nova, não só editar o que já existe: imagem para b-roll,
+intro, trilha sonora do tamanho certo do corte, efeito sonoro (SFX) e voz em pt-BR — e também
+fazer upscale de imagem/vídeo e buscar b-roll de banco (stock). Isso passa por um serviço à
+parte, o **Magnific**, que só entra na conversa quando o pedido pede geração de verdade
+("gera uma intro com ia", "cria uma trilha", "faz upscale dessa imagem", "busca um b-roll de
+escritório") — pedido comum ("aprova o corte", "muda a cor") não carrega o Magnific, porque o
+catálogo dele sozinho custa 39 mil tokens por sessão.
+
+**Isso gasta créditos do Magnific**, cobrados à parte da cota de mensagens do chat. O Edvid
+sempre baixa o resultado de verdade (nunca inventa URL) com a ferramenta `baixar_para_projeto`
+e guarda na pasta certa: imagem/vídeo em `broll/`, trilha em `trilha.<ext>` (liga a trilha
+sonora sozinho), intro em `intro/` (o render da intro ainda é de outra story — aqui só fica
+guardada), SFX em `sfx/`, voz em `voz/`. Ao terminar, ele diz o que gerou e quanto custou.
+
+**Só funciona pela ponte-claude, não pelo modo local** (Ollama): o Magnific roda como servidor
+MCP autenticado do lado da VPS, e não existe no Mac do Gabriel.
+
 ## Fase 1 — o corte orgânico
 
 1. **Transcreve** com Whisper (`large-v3-turbo`) palavra a palavra — é esse

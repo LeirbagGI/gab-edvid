@@ -82,7 +82,10 @@ export function montarMcp(app, { carregar, salvar, transmitir, fila }) {
       }, async (entrada) => {
         const trabalhos = [];
         const registro = registros.get(nome) || iniciarRegistro(nome);
-        const resultado = executar(f.name, entrada || {}, projeto, trabalhos, registro);
+        // `executar` e sincrona para quase tudo; so `baixar_para_projeto`
+        // devolve uma Promise (baixa arquivo de verdade) — `await` aqui
+        // funciona igual para os dois casos.
+        const resultado = await executar(f.name, entrada || {}, projeto, trabalhos, registro);
         salvar(projeto);
         trabalhos.forEach((t) => fila.enfileirar(t.tipo, { nome: t.nome }));
         transmitir({ tipo: 'projeto', projeto });

@@ -10,6 +10,7 @@ import { caminhoProjeto, carregar, salvar } from '../fase1/projeto.js';
 import { gerarPicos } from '../fase1/render.js';
 import { ffprobe } from '../shared/exec.js';
 import { narra, acao, seg } from '../shared/conversa.js';
+import { gerarPreview } from '../shared/preview.js';
 
 const aqui = path.dirname(fileURLToPath(import.meta.url));
 const ENTRADA = path.join(aqui, '..', '..', 'remotion', 'index.jsx');
@@ -179,6 +180,17 @@ export async function rodarFase2(nome, { log = () => {} } = {}) {
   const picos = await gerarPicos(saida);
   const infoFinal = await ffprobe(saida);
 
+  // Proxy leve para o player (src/shared/preview.js) — falha aqui nao
+  // derruba a fase, so fica sem preview (o player cai para o arquivo pesado).
+  log({ etapa: 'preview', msg: 'Gerando pré-visualização leve' });
+  let preview = null;
+  try {
+    await gerarPreview(saida, path.join(pasta, 'fase2-preview.mp4'));
+    preview = 'fase2-preview.mp4';
+  } catch (e) {
+    avisos.push(`Pré-visualização não gerada: ${e.message}`);
+  }
+
   const atual = carregar(nome);
   atual.fase2 = {
     ...projeto.fase2,
@@ -188,6 +200,7 @@ export async function rodarFase2(nome, { log = () => {} } = {}) {
     arquivo: path.relative(pasta, saida),
     renderizadaEm: new Date().toISOString(),
     avisos,
+    ...(preview ? { preview } : {}),
   };
   salvar(atual);
 

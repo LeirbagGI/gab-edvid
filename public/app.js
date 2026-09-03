@@ -107,7 +107,10 @@ function aplicar(projeto) {
   // Todo projeto chama o arquivo de fase1-corte.mp4, então comparar o NOME
   // nunca detecta troca de projeto. Compara a URL inteira.
   const v = $('#player');
-  const src = `/midia/${encodeURIComponent(P.nome)}/${f1.arquivo}`;
+  // Toca o proxy leve quando existe (720p, quadro-chave a cada 0,5 s); o
+  // arquivo completo fica no botão de baixar. `?v=` versiona para o cache.
+  const src = `/midia/${encodeURIComponent(P.nome)}/${f1.preview || f1.arquivo}?v=${encodeURIComponent(f1.renderizadoEm || '')}`;
+  ligarBaixar('baixarF1', `/midia/${encodeURIComponent(P.nome)}/${f1.arquivo}`, `${P.nome}-corte.mp4`);
   if (v.dataset.src !== src) {
     v.dataset.src = src;
     v.src = src;
@@ -704,7 +707,8 @@ function aplicarFase2() {
   if (!pronta) return;
 
   const v = tlVisual.player;
-  const src = `/midia/${encodeURIComponent(P.nome)}/${f2.arquivo}?v=${f2.renderizadaEm || ''}`;
+  const src = `/midia/${encodeURIComponent(P.nome)}/${f2.preview || f2.arquivo}?v=${encodeURIComponent(f2.renderizadaEm || '')}`;
+  ligarBaixar('baixarF2', `/midia/${encodeURIComponent(P.nome)}/${f2.arquivo}`, `${P.nome}-final.mp4`);
   if (v.dataset.src !== src) {
     v.dataset.src = src;
     v.src = src;
@@ -785,46 +789,73 @@ $('#fVideos').onchange = (e) => {
 };
 
 // XHR em vez de fetch porque só ele dá progresso de upload — e vídeo é grande.
-function subirVideos(arquivos) {
-  const fd = new FormData();
-  arquivos.forEach((f) => fd.append('videos', f));
+
+// Botão "Baixar": o player toca o proxy leve, o arquivo completo sai por aqui.
+function ligarBaixar(id, url, nome) {
+  const a = document.getElementById(id);
+  if (!a) return;
+  a.href = url;
+  a.download = nome;
+  a.style.display = '';
+}
+
+async function subirVideos(arquivos) {
+  // Upload em pedaços de 8 MB: cada pedaço é uma requisição curta, então o
+  // proxy (Traefik, 60 s de leitura) nunca corta um vídeo grande no meio.
   const total = arquivos.reduce((s, f) => s + f.size, 0);
-  const nomes = arquivos.map((f) => f.name).join(', ');
   const barra = $('#barraUp');
   barra.style.display = '';
-  recado(`Enviando ${nomes} (${(total / 1048576).toFixed(0)} MB)…`);
-
-  const x = new XMLHttpRequest();
-  x.open('POST', '/api/upload');
-  x.upload.onprogress = (e) => {
-    if (!e.lengthComputable) return;
-    const pct = (e.loaded / e.total) * 100;
+  let enviadoAntes = 0;
+  let enfileirados = 0;
+  const falhas = [];
+  const progresso = (parcial, nome) => {
+    const pct = Math.min(100, ((enviadoAntes + parcial) / total) * 100);
     barra.firstElementChild.style.width = `${pct}%`;
-    recado(`Enviando ${nomes} — ${pct.toFixed(0)}%`);
+    recado(`Enviando ${nome} — ${pct.toFixed(0)}% de ${(total / 1048576).toFixed(0)} MB`);
   };
-  x.onload = () => {
-    barra.style.display = 'none';
-    barra.firstElementChild.style.width = '0';
-    let r = {};
-    try { r = JSON.parse(x.responseText); } catch { /* resposta estranha */ }
-    if (x.status !== 200) {
-      recado(`O servidor recusou (HTTP ${x.status}). Veja o terminal do preview.`, 'erro');
-      return;
+  const putPedaco = (id, indice, blob, nome, base) => new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', `/api/upload/${id}/${indice}`);
+    x.upload.onprogress = (e) => { if (e.lengthComputable) progresso(base + e.loaded, nome); };
+    x.onload = () => (x.status === 200 ? resolve() : reject(new Error(`HTTP ${x.status} no pedaço ${indice}`)));
+    x.onerror = () => reject(new Error(`rede caiu no pedaço ${indice}`));
+    x.send(blob);
+  });
+  for (const f of arquivos) {
+    try {
+      const r0 = await fetch('/api/upload/iniciar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome: f.name, tamanho: f.size, tipo: f.type }),
+      });
+      if (!r0.ok) throw new Error((await r0.json().catch(() => ({}))).erro || `HTTP ${r0.status} ao iniciar`);
+      const { id, tamanhoPedaco } = await r0.json();
+      const n = Math.max(1, Math.ceil(f.size / tamanhoPedaco));
+      for (let i = 0; i < n; i++) {
+        const blob = f.slice(i * tamanhoPedaco, Math.min(f.size, (i + 1) * tamanhoPedaco));
+        let tentativa = 0;
+        for (;;) {
+          try { await putPedaco(id, i, blob, f.name, i * tamanhoPedaco); break; } catch (e) {
+            if (++tentativa >= 3) throw e;
+            await new Promise((ok) => setTimeout(ok, 1500 * tentativa));
+          }
+        }
+      }
+      const r1 = await fetch(`/api/upload/${id}/finalizar`, { method: 'POST' });
+      if (!r1.ok) throw new Error((await r1.json().catch(() => ({}))).erro || `HTTP ${r1.status} ao finalizar`);
+      enfileirados++;
+    } catch (e) {
+      falhas.push(`${f.name}: ${e.message}`);
     }
-    const partes = [];
-    if (r.enfileirados) partes.push(`${r.enfileirados} vídeo(s) na fila`);
-    if (r.recusados?.length) {
-      partes.push(`recusados: ${r.recusados.join(', ')} — aceito ${(r.aceitos || []).join(', ')}`);
-    }
-    recado(partes.join(' · ') || 'Nada foi enviado.', r.enfileirados ? 'ok' : 'erro');
-    listarProjetos();
-    desenharProjetos();
-  };
-  x.onerror = () => {
-    barra.style.display = 'none';
-    recado('Falhou o envio — o servidor do preview está rodando? (npm run preview)', 'erro');
-  };
-  x.send(fd);
+    enviadoAntes += f.size;
+  }
+  barra.style.display = 'none';
+  barra.firstElementChild.style.width = '0';
+  const partes = [];
+  if (enfileirados) partes.push(`${enfileirados} vídeo(s) na fila`);
+  if (falhas.length) partes.push(`falhou: ${falhas.join(' · ')}`);
+  recado(partes.join(' · ') || 'Nada foi enviado.', enfileirados ? 'ok' : 'erro');
+  listarProjetos();
+  desenharProjetos();
 }
 
 $('#btnVarrer').onclick = async () => {
