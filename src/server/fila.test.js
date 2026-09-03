@@ -7,6 +7,9 @@ import path from 'node:path';
 // A fila importa rodarFase1/rodarFase2 de verdade; aqui so exercitamos o
 // mecanismo (ordem, serialidade, erro que nao derruba o resto) com um tipo
 // falso injetado.
+// O singleton persiste em RAIZ/fila.json; sem isolar a RAIZ, o teste herda
+// sujeira de outras execucoes (um "rodando" preso) e fica intermitente.
+process.env.EDVID_RAIZ = fs.mkdtempSync(path.join(os.tmpdir(), 'edvid-fila-raiz-'));
 const { fila, Fila } = await import('./fila.js');
 
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
