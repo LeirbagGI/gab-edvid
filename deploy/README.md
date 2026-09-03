@@ -4,6 +4,13 @@ Container em `/opt/edvid/app` (código) e `/opt/edvid/dados` (volumes: `projetos
 `entrada`, `modelos`, `bundle`), na VPS `134.199.251.30`, atrás do Traefik que já roteia
 `*.gestaoimpacto.com` (rede `gestaoimpacto_web`).
 
+**C1 — sidecar `transcritor`:** container Python separado (`edvid-transcritor`), só na
+rede interna `edvid_internal`, sem porta publicada. `WHISPER_MODO=transcritor` já é o
+padrão no `docker-compose.yml` (faster-whisper bateu o whisper.cpp em velocidade e
+qualidade — medição em `../docs/implementacao/c1-transcritor.md`); pra voltar ao
+`whisper-cli` do serviço `edvid`, comente as duas linhas `WHISPER_MODO`/`TRANSCRITOR_URL`
+do serviço `edvid` no compose.
+
 **MVP sem login** (decisão do William, 02/09): o router do Traefik não tem middleware de
 autenticação. Não sobe nada sensível na URL pública até isso mudar.
 
@@ -30,11 +37,18 @@ local):
 ssh -i ~/.ssh/gi-vps root@134.199.251.30 "/opt/edvid/app/deploy/baixar-modelo.sh"
 ```
 
+O `transcritor` não precisa desse passo: ele baixa o próprio modelo sozinho (para
+`/opt/edvid/dados/modelos-transcritor`) na primeira chamada a `/transcrever` — a primeira
+transcrição depois de subir demora mais por causa disso (~1,5 GB pro `large-v3-turbo`
+int8), as seguintes usam o modelo já em memória.
+
 ## Onde estão os dados
 
 | O quê | Onde |
 |---|---|
 | Projetos, entrada, modelos, bundle | `/opt/edvid/dados/{projetos,entrada,modelos,bundle}` na VPS |
+| Modelo do `transcritor` (baixado sozinho) | `/opt/edvid/dados/modelos-transcritor` na VPS |
+| Cache de transcrição por hash do áudio | `/opt/edvid/dados/cache-transcritor` na VPS |
 | Código | `/opt/edvid/app` na VPS |
 | Overrides de variável de ambiente (opcional) | `/opt/edvid/app/.env` — não existe por padrão |
 
@@ -42,6 +56,7 @@ ssh -i ~/.ssh/gi-vps root@134.199.251.30 "/opt/edvid/app/deploy/baixar-modelo.sh
 
 ```bash
 ssh -i ~/.ssh/gi-vps root@134.199.251.30 "cd /opt/edvid/app && docker compose logs -f edvid"
+ssh -i ~/.ssh/gi-vps root@134.199.251.30 "cd /opt/edvid/app && docker compose logs -f transcritor"
 ```
 
 ## Rodar um comando dentro do container

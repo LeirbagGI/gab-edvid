@@ -45,12 +45,21 @@ services:
       REMOTION_CONCURRENCY: "2"
       EDVID_JPEG_QUALIDADE: "80"
       EDVID_GL: "swangle"
+      # C1 (sidecar transcritor — docs/implementacao/c1-transcritor.md): faster-whisper
+      # bateu o whisper.cpp em velocidade e qualidade nas medições da story, então
+      # WHISPER_MODO passa a transcritor por padrão. Pra voltar pro cpp (reserva —
+      # PRD Épico C), comente as duas linhas abaixo; `config.js` cai sozinho pro default
+      # `cpp` sem elas.
+      WHISPER_MODO: "transcritor"
+      TRANSCRITOR_URL: "http://transcritor:4822"
     # Opcional: sobrescrever variáveis do ENV da imagem sem rebuildar (ex.: trocar
     # WHISPER_MODO). `required: false` porque hoje não existe nenhum `.env` — sem isso o
     # `docker compose up` falharia por causa de um env_file que não existe.
     env_file:
       - path: .env
         required: false
+    depends_on:
+      - transcritor
     networks:
       - gestaoimpacto_web
       - edvid_internal
@@ -61,6 +70,26 @@ services:
       - "traefik.http.routers.edvid.tls=true"
       - "traefik.http.routers.edvid.tls.certresolver=le"
       - "traefik.http.services.edvid.loadbalancer.server.port=4820"
+
+  # C1 (sidecar transcritor — docs/implementacao/c1-transcritor.md): faster-whisper em
+  # Python, timestamp por palavra melhor e mais rápido que o whisper-cli do serviço
+  # `edvid`. Só na rede interna: nada de porta publicada nem label do Traefik, ninguém
+  # de fora precisa falar com ele.
+  transcritor:
+    build: ./transcritor
+    container_name: edvid-transcritor
+    restart: unless-stopped
+    volumes:
+      - /opt/edvid/dados/modelos-transcritor:/modelos
+      - /opt/edvid/dados/cache-transcritor:/cache
+    mem_limit: 2500m
+    cpus: "3"
+    environment:
+      TRANSCRITOR_MODELO: "large-v3-turbo"
+      TRANSCRITOR_THREADS: "3"
+      HF_HOME: "/modelos"
+    networks:
+      - edvid_internal
 
 networks:
   # Rede do Traefik do gestaoimpacto — já existe na VPS, criada pelo stack dele.

@@ -1,0 +1,9 @@
+faster-whisper==1.2.1
+fastapi==0.141.1
+uvicorn==0.52.4
+python-multipart==0.0.32
+
+# Alinhamento por palavra (opcional, desligado por padrao — ver README.md e
+# docs/implementacao/c1-transcritor.md antes de descomentar: mediu ~2,3 GB de
+# pico de RAM e o dobro do tempo total contra so o faster-whisper).
+# whisperx==3.8.6
