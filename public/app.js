@@ -14,6 +14,37 @@ import {
   TRANSICOES, EFEITOS, INTRO_PADRAO, ANIMACOES_INTRO, transicaoPadrao,
 } from '/shared/efeitos.js';
 import { montarCor, aplicarCor } from '/cor.js';
+import {
+  montarLegendaEditor, aplicarLegendaEditor, aoTempoLegendaEditor,
+} from '/legenda-editor.js';
+
+/* -------------------------------------------------- legenda: DNA e uso (UI-2) */
+// Mapa fixo (docs/planejamento/legendas-referencia.md, recomendação de uso por
+// preset) — só os 20 novos da pesquisa entram aqui; os 9+5 antigos ficam sem
+// tag ("Clássicos" no filtro).
+const TAG_LEGENDA = {
+  hormozi: 'palestra', podcast: 'palestra', beast: 'palestra',
+  'pop-palavra': 'palestra', marcal: 'palestra', tremor: 'palestra',
+  'dark-venda': 'venda', primo: 'venda', empilhada: 'venda', emoji: 'venda',
+  premium: 'autoridade', peso: 'autoridade', 'moldura-ouro': 'autoridade',
+  desfoque: 'autoridade', brilho: 'autoridade',
+};
+const NOME_TAG_LEGENDA = { palestra: 'palestra e corte', venda: 'venda', autoridade: 'autoridade' };
+const FILTROS_TAG_LEGENDA = [
+  ['', 'Todos'], ['palestra', 'Palestra e corte'], ['venda', 'Venda'],
+  ['autoridade', 'Autoridade'], ['classico', 'Clássicos'],
+];
+
+/** Linha pequena "pop · destaque": entrada (se != nenhuma), ativa (se diferente
+ * da entrada), e "destaque" quando o preset tem `destaque(cor)` (marca
+ * palavra-chave numa cor própria). */
+function dnaLegenda(l) {
+  const partes = [];
+  if (l.entrada && l.entrada !== 'nenhuma') partes.push(l.entrada);
+  if (l.ativa && l.ativa !== 'nenhuma' && l.ativa !== l.entrada) partes.push(l.ativa);
+  if (l.destaque) partes.push('destaque');
+  return partes.join(' · ');
+}
 
 /* ---------------------------------------------------------------- presets */
 // Os mockups de celular de cada tipo de edicao. So isso e local: e ilustracao
@@ -115,6 +146,11 @@ function aplicar(projeto) {
   }
   $('#corteVazio').style.display = 'none';
   $('#corteConteudo').style.display = '';
+  // O painel de legenda abre com o primeiro clipe já selecionado — senão o
+  // usuário chega numa lista vazia e não entende que precisa clicar antes.
+  if (!clipeSel || !f1.clipes.some((c) => c.id === clipeSel)) {
+    clipeSel = f1.clipes.find((c) => c.ativo !== false)?.id || null;
+  }
 
   // Todo projeto chama o arquivo de fase1-corte.mp4, então comparar o NOME
   // nunca detecta troca de projeto. Compara a URL inteira.
@@ -149,7 +185,7 @@ function aplicar(projeto) {
  * video final. Sem isso as duas timelines iam divergir com o tempo.
  */
 function criarTimeline({
-  sufixo, video, dados, aoSelecionar, comTransicoes = false,
+  sufixo, video, dados, aoSelecionar, comTransicoes = false, aoTempo,
 }) {
   const q = (id) => $(`#${id}${sufixo}`);
   const player = $(`#${video}`);
@@ -284,6 +320,7 @@ function criarTimeline({
     el.tAtual.textContent = fmt(player.currentTime);
     mover();
     if (!player.paused) seguir();
+    if (aoTempo) aoTempo(player.currentTime);
   };
   const iconePlay = (tocando) => (tocando
     ? '<svg viewBox="0 0 16 16"><rect x="3" y="2" width="4" height="12" fill="currentColor"/><rect x="9" y="2" width="4" height="12" fill="currentColor"/></svg>'
@@ -391,8 +428,16 @@ const tlCorte = criarTimeline({
     picos: P.fase1.picos,
     selecionado: clipeSel,
   } : null),
-  aoSelecionar: (id) => { clipeSel = id; tlCorte.desenhar(); desenharFicha(); },
+  aoSelecionar: (id) => {
+    clipeSel = id; tlCorte.desenhar(); desenharFicha(); desenharLegendaEditorPainel();
+  },
+  aoTempo: (t) => aoTempoLegendaEditor(t),
 });
+
+/** Redesenha o painel "Legenda" da Fase 1 com o clipe selecionado atual. */
+function desenharLegendaEditorPainel() {
+  if (P) aplicarLegendaEditor(P, clipeSel);
+}
 
 /* ------------------------------------------------ popover de transição */
 /*
@@ -456,7 +501,7 @@ for (const [v, onde] of [[tlCorte.player, '#legendaPrev'], [tlVisual.player, '#l
   v.style.cursor = 'pointer';
 }
 
-function desenharTimeline() { tlCorte.desenhar(); }
+function desenharTimeline() { tlCorte.desenhar(); desenharLegendaEditorPainel(); }
 
 function desenharFicha() {
   const c = P.fase1.clipes.find((x) => x.id === clipeSel);
@@ -569,7 +614,23 @@ function montarEstilo() {
            ${p.fundoAmostra ? `style="background:${p.fundoAmostra}"` : ''}></div>
     </div>`;
   $('#headlines').innerHTML = HEADLINES.map((h) => preset(h, 'h')).join('');
-  $('#legendas').innerHTML = LEGENDAS.map((l) => preset(l, 'l')).join('');
+
+  // Legenda (UI-2): card maior, com nome e "DNA" vis\u00edveis \u2014 34 amostras
+  // min\u00fasculas e sem r\u00f3tulo ningu\u00e9m distinguia (docs/implementacao/ui1-estilo.png).
+  const legendaCard = (l) => {
+    const tag = TAG_LEGENDA[l.id];
+    const dna = dnaLegenda(l);
+    return `
+    <div class="preset legPreset" data-id="${l.id}" data-tag="${tag || ''}" data-nome="${l.nome.toLowerCase()}">
+      <span class="marcaSel">\u2713</span>
+      <div class="amostra amostraLeg" data-amostra="l:${l.id}"
+           ${l.fundoAmostra ? `style="background:${l.fundoAmostra}"` : ''}></div>
+      <div class="nome">${l.nome}</div>
+      ${dna ? `<div class="dna">${dna}</div>` : ''}
+      ${tag ? `<div class="tagUso">${NOME_TAG_LEGENDA[tag]}</div>` : ''}
+    </div>`;
+  };
+  $('#legendas').innerHTML = LEGENDAS.map(legendaCard).join('');
 
   $('#elementos').innerHTML = ELEMENTOS.map((e) => `
     <div class="toggle" data-id="${e.id}">
@@ -593,10 +654,126 @@ function montarEstilo() {
     salvarEstilo({ elementos: { ...P.estilo.elementos, [k]: !P.estilo.elementos[k] } });
   };
 
+  montarFiltroLegendas();
+  montarAjustesLegenda();
   montarTransicoes();
   montarEfeitos();
   montarIntro();
   animar();
+}
+
+/* ---------------------------------------------------- filtro de legendas */
+function montarFiltroLegendas() {
+  $('#filtroTagLegenda').innerHTML = FILTROS_TAG_LEGENDA
+    .map(([v, nome], i) => `<button data-v="${v}" type="button" class="${i === 0 ? 'on' : ''}">${nome}</button>`)
+    .join('');
+  $('#filtroTagLegenda').onclick = (e) => {
+    const el = e.target.closest('button');
+    if (!el) return;
+    $$('#filtroTagLegenda button').forEach((b) => b.classList.toggle('on', b === el));
+    aplicarFiltroLegendas();
+  };
+  $('#buscaLegenda').oninput = () => aplicarFiltroLegendas();
+}
+
+function aplicarFiltroLegendas() {
+  const tagAtiva = $('#filtroTagLegenda .on')?.dataset.v || '';
+  const busca = $('#buscaLegenda').value.trim().toLowerCase();
+  $$('#legendas .legPreset').forEach((el) => {
+    const tag = el.dataset.tag;
+    const passaTag = !tagAtiva || (tagAtiva === 'classico' ? !tag : tag === tagAtiva);
+    const passaBusca = !busca || el.dataset.nome.includes(busca);
+    el.style.display = (passaTag && passaBusca) ? '' : 'none';
+  });
+}
+
+/* --------------------------------------------------- ajustes da legenda */
+// PUT .../legenda: override de estilo.legenda por cima do preset. `escolha`
+// converte o valor do bot\u00e3o pro corpo que a rota espera (mai\u00fasculas usa
+// null pro "do estilo" \u2014 os outros campos n\u00e3o aceitam null, ver
+// validarConfigLegenda em src/server/legenda-edicao.js).
+function montarAjustesLegenda() {
+  const segmento = (idBox, chave, opcoes, escolha) => {
+    $(idBox).innerHTML = opcoes.map(([v, nome]) => `<button data-v="${v}" type="button">${nome}</button>`).join('');
+    $(idBox).onclick = (e) => {
+      const el = e.target.closest('button');
+      if (!el) return;
+      salvarLegenda({ [chave]: escolha ? escolha(el.dataset.v) : el.dataset.v });
+    };
+  };
+  segmento('#legPosicao', 'posicao', [['baixo', 'Baixo'], ['meio', 'Meio'], ['alto', 'Alto']]);
+  segmento('#legAlinhamento', 'alinhamento', [['centro', 'Centro'], ['esquerda', 'Esquerda']]);
+  segmento('#legMaiusculas', 'maiusculas',
+    [['estilo', 'Do estilo'], ['sempre', 'Sempre'], ['nunca', 'Nunca']],
+    (v) => (v === 'estilo' ? null : v === 'sempre'));
+
+  const fmtX = (v) => `${Number(v).toFixed(2).replace('.', ',')}\u00d7`;
+  const fmtS = (v) => `${Number(v).toFixed(2).replace('.', ',')}s`;
+  $('#legEscala').oninput = (e) => {
+    $('#legEscalaValor').textContent = fmtX(e.target.value);
+    salvarLegenda({ escala: Number(e.target.value) });
+  };
+  $('#legAntecedencia').oninput = (e) => {
+    $('#legAntecedenciaValor').textContent = fmtS(e.target.value);
+    salvarLegenda({ antecedencia: Number(e.target.value) });
+  };
+  $('#legMaxPalavras').oninput = (e) => {
+    $('#legMaxPalavrasValor').textContent = e.target.value;
+    salvarLegenda({ maxPalavras: Number(e.target.value) });
+  };
+
+  // "posicao"/"escala"/"alinhamento"/"antecedencia"/"maxPalavras" n\u00e3o aceitam
+  // null na valida\u00e7\u00e3o do servidor (s\u00f3 "maiusculas" aceita) \u2014 ausentes eles
+  // simplesmente n\u00e3o mudam no servidor, ent\u00e3o o reset de verdade \u00e9 local
+  // (o card volta a refletir o preset puro na hora).
+  $('#btnLegendaPadrao').onclick = () => {
+    P.estilo.legenda = {};
+    aplicarAjustesLegenda();
+    desenharAmostras((performance.now() / 1000) % CICLO);
+    salvarLegenda({ maiusculas: null });
+  };
+}
+
+let tLegenda = null;
+let pendenteLegenda = {};
+function salvarLegenda(patch) {
+  P.estilo.legenda = { ...(P.estilo.legenda || {}), ...patch };
+  pendenteLegenda = { ...pendenteLegenda, ...patch };
+  aplicarAjustesLegenda();
+  desenharAmostras((performance.now() / 1000) % CICLO);
+
+  clearTimeout(tLegenda);
+  tLegenda = setTimeout(async () => {
+    const corpo = pendenteLegenda;
+    pendenteLegenda = {};
+    const r = await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/legenda`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo),
+    });
+    if (r.ok) {
+      P.estilo.legenda = await r.json();
+      aplicarAjustesLegenda();
+    }
+  }, 300);
+}
+
+function aplicarAjustesLegenda() {
+  const l = P?.estilo?.legenda || {};
+  $$('#legPosicao button').forEach((b) => b.classList.toggle('on', (l.posicao || 'baixo') === b.dataset.v));
+  $$('#legAlinhamento button').forEach((b) => b.classList.toggle('on', (l.alinhamento || 'centro') === b.dataset.v));
+  const maiusculasEstado = l.maiusculas === true ? 'sempre' : l.maiusculas === false ? 'nunca' : 'estilo';
+  $$('#legMaiusculas button').forEach((b) => b.classList.toggle('on', maiusculasEstado === b.dataset.v));
+
+  const escala = typeof l.escala === 'number' ? l.escala : 1;
+  if (document.activeElement !== $('#legEscala')) $('#legEscala').value = String(escala);
+  $('#legEscalaValor').textContent = `${escala.toFixed(2).replace('.', ',')}\u00d7`;
+
+  const antecedencia = typeof l.antecedencia === 'number' ? l.antecedencia : 0.12;
+  if (document.activeElement !== $('#legAntecedencia')) $('#legAntecedencia').value = String(antecedencia);
+  $('#legAntecedenciaValor').textContent = `${antecedencia.toFixed(2).replace('.', ',')}s`;
+
+  const maxPalavras = typeof l.maxPalavras === 'number' ? l.maxPalavras : 4;
+  if (document.activeElement !== $('#legMaxPalavras')) $('#legMaxPalavras').value = String(maxPalavras);
+  $('#legMaxPalavrasValor').textContent = String(maxPalavras);
 }
 
 /* --------------------------------------------------------------- transi\u00e7\u00e3o */
@@ -774,7 +951,7 @@ function desenharAmostras(t) {
     const lista = tipo === 'h' ? HEADLINES : LEGENDAS;
     const p = lista.find((x) => x.id === id);
     if (!p) return;
-    const html = tipo === 'h' ? amostraHeadline(p, t, cor) : amostraLegenda(p, t, cor);
+    const html = tipo === 'h' ? amostraHeadline(p, t, cor) : amostraLegenda(p, t, cor, P?.estilo?.legenda);
     if (el.dataset.ultimo !== html) { el.innerHTML = html; el.dataset.ultimo = html; }
   });
 }
@@ -819,6 +996,7 @@ function aplicarEstilo() {
   $$('#tipoEdicao .card').forEach((el) => el.classList.toggle('on', el.dataset.id === s.tipoEdicao));
   $$('#headlines .preset').forEach((el) => el.classList.toggle('on', el.dataset.id === s.estiloHeadline));
   $$('#legendas .preset').forEach((el) => el.classList.toggle('on', el.dataset.id === s.estiloLegenda));
+  aplicarAjustesLegenda();
 
   const transicao = transicaoPadrao(s);
   $$('#elementos .toggle').forEach((el) => {
@@ -969,6 +1147,10 @@ ws.onmessage = (ev) => {
 
 montarEstilo();
 montarCor();
+montarLegendaEditor({
+  moverAgulha: (t) => { tlCorte.player.currentTime = t; },
+  recarregar: () => P && abrir(P.nome),
+});
 listarProjetos();
 
 /* ================================================================== fase 2 */

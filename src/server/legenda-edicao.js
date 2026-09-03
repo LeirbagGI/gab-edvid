@@ -142,7 +142,9 @@ const ALINHAMENTOS_LEGENDA = ['centro', 'esquerda'];
  */
 export function validarConfigLegenda(corpo) {
   const erros = [];
-  const c = corpo || {};
+  // `null` em qualquer campo significa "volta ao padrao do estilo": a rota
+  // apaga a chave. Por isso a validacao ignora nulos.
+  const c = Object.fromEntries(Object.entries(corpo || {}).filter(([, v]) => v !== null));
 
   if (c.posicao !== undefined && !POSICOES_LEGENDA.includes(c.posicao)) {
     erros.push(`posicao invalida: "${c.posicao}" (use ${POSICOES_LEGENDA.join(' | ')})`);

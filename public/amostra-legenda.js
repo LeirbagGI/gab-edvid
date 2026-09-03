@@ -29,11 +29,34 @@ function blocosDe(preset) {
   return blocosPorPreset.get(preset.id);
 }
 
-export function amostraLegenda(p, t, cor) {
-  // `escala` do preset multiplica o corpo, e `maiusculas` vira text-transform
-  // no container — igual ao render.
-  const extra = (p.escala ? `;font-size:${p.escala}em` : '')
-    + (p.maiusculas ? ';text-transform:uppercase' : '');
+/**
+ * `override` (opcional) e o mesmo formato de `estilo.legenda` (API-2): o card
+ * da aba Estilo usa para refletir ao vivo o que o usuario esta ajustando —
+ * `escala` multiplica a do preset, `maiusculas` (true|false) forca o estado
+ * (ausente/null mantem o do preset), `alinhamento` e `posicao` mexem em
+ * texto e posicao vertical dentro do card. Sem `override`, o resultado e
+ * identico ao de antes (amostras.html continua chamando sem o 4o argumento).
+ */
+export function amostraLegenda(p, t, cor, override) {
+  const escalaOverride = override?.escala;
+  const maiusculasOverride = override?.maiusculas;
+  const alinhamentoOverride = override?.alinhamento;
+  const posicaoOverride = override?.posicao;
+
+  const escalaFinal = (p.escala || 1) * (typeof escalaOverride === 'number' ? escalaOverride : 1);
+  const maiusculasFinal = maiusculasOverride === true ? true
+    : maiusculasOverride === false ? false
+      : !!p.maiusculas;
+
+  // `escala`/`maiusculas` do preset ja tinham esse mesmo efeito sem override
+  // (compatibilidade com amostras.html, que chama sem o 4o argumento).
+  let extra = (escalaFinal !== 1 ? `;font-size:${escalaFinal}em` : '')
+    + (maiusculasFinal ? ';text-transform:uppercase' : '');
+  if (alinhamentoOverride) extra += `;text-align:${alinhamentoOverride === 'esquerda' ? 'left' : 'center'}`;
+  if (posicaoOverride) {
+    const alinha = posicaoOverride === 'alto' ? 'flex-start' : posicaoOverride === 'meio' ? 'center' : 'flex-end';
+    extra += `;align-self:${alinha}`;
+  }
 
   if (p.modo === 'nenhum') return `<span style='${cssDe(p.base(cor))}${extra}'>${p.amostra}</span>`;
 

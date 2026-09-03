@@ -19,14 +19,23 @@ const aqui = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.join(aqui, '..', '..');
 const PUBLICO = path.join(RAIZ, 'public');
 
+// Palavras do c1: uma com destaque, uma oculta — para os testes da UI-2
+// (painel de legenda) terem o que checar sem precisar de projeto de verdade.
+const PALAVRAS_C1 = [
+  { inicio: 0, fim: 0.6, texto: 'Essa' },
+  { inicio: 0.6, fim: 1.2, texto: 'é' },
+  { inicio: 1.2, fim: 2, texto: 'importante', destaque: true },
+  { inicio: 2, fim: 3, texto: 'escondida', oculta: true },
+];
+
 /** Projeto de mentira com o mesmo formato do projeto.json real. */
 function projetoFalso() {
-  const clipe = (id, bloco, inicio, dur) => ({
+  const clipe = (id, bloco, inicio, dur, palavras) => ({
     id, bloco,
     inicio, fim: inicio + dur, duracao: dur,
     origemInicio: inicio, origemFim: inicio + dur,
     texto: `fala do ${id}`,
-    palavras: [{ inicio, fim: inicio + dur, texto: 'fala' }],
+    palavras: palavras || [{ inicio, fim: inicio + dur, texto: 'fala' }],
   });
   return {
     nome: 'Teste',
@@ -36,7 +45,11 @@ function projetoFalso() {
       status: 'aguardando-aprovacao',
       arquivo: 'fase1-corte.mp4',
       duracao: 9,
-      clipes: [clipe('c1', 'HOOK', 0, 3), clipe('c2', 'DINAMICA', 3, 4), clipe('c3', 'CTA', 7, 2)],
+      clipes: [
+        clipe('c1', 'HOOK', 0, 3, PALAVRAS_C1),
+        clipe('c2', 'DINAMICA', 3, 4),
+        clipe('c3', 'CTA', 7, 2),
+      ],
       descartados: [],
       picos: new Array(200).fill(0.4),
     },
@@ -99,6 +112,15 @@ async function montarPagina() {
       if (c) Object.assign(c, patch);
       return json(c || {});
     }
+    // PUT /legenda (API-2): mesmo merge raso do servidor real — salvarLegenda()
+    // (app.js) lê o corpo da resposta e sobrescreve P.estilo.legenda com ele.
+    if (metodo === 'PUT' && /\/legenda$/.test(u)) {
+      const patch = JSON.parse(opcoes.body || '{}');
+      projeto.estilo.legenda = { ...(projeto.estilo.legenda || {}), ...patch };
+      return json(projeto.estilo.legenda);
+    }
+    if (metodo === 'PATCH' && u.includes('/palavras')) return json({ palavra: {} });
+    if (metodo === 'POST' && u.includes('/palavras/')) return json({ palavra: {}, palavras: [] });
     if (u.includes('/api/projeto/')) return json(projeto);
     return json({ ok: true });
   };
@@ -113,6 +135,7 @@ async function montarPagina() {
   const corCompartilhado = fs.readFileSync(path.join(RAIZ, 'src', 'shared', 'cor.js'), 'utf8');
   const amostraLegenda = fs.readFileSync(path.join(PUBLICO, 'amostra-legenda.js'), 'utf8');
   const corPagina = fs.readFileSync(path.join(PUBLICO, 'cor.js'), 'utf8');
+  const legendaEditor = fs.readFileSync(path.join(PUBLICO, 'legenda-editor.js'), 'utf8');
   const app = fs.readFileSync(path.join(PUBLICO, 'app.js'), 'utf8');
 
   // Junta os módulos num script só, trocando os imports pelo corpo deles.
@@ -132,16 +155,24 @@ async function montarPagina() {
     .replace(/^export /gm, '');
   const corPaginaEnvolta = `(function () {\n${semImportCorPagina}\n`
     + 'window.montarCor = montarCor; window.aplicarCor = aplicarCor;\n})();';
+  // legenda-editor.js declara `$`/`$$` locais, do mesmo nome que app.js e cor.js
+  // — mesma razão da IIFE de cor.js acima.
+  const semImportLegendaEditor = legendaEditor.replace(/^export /gm, '');
+  const legendaEditorEnvolta = `(function () {\n${semImportLegendaEditor}\n`
+    + 'window.montarLegendaEditor = montarLegendaEditor;'
+    + ' window.aplicarLegendaEditor = aplicarLegendaEditor;'
+    + ' window.aoTempoLegendaEditor = aoTempoLegendaEditor;\n})();';
   const semImportApp = app
     .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/presets\.js';/m, '')
     .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/amostra-legenda\.js';/m, '')
     .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/shared\/efeitos\.js';/m, '')
-    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/cor\.js';/m, '');
+    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/cor\.js';/m, '')
+    .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\/legenda-editor\.js';/m, '');
 
   try {
     window.eval([
       semExportPresets, semExportLegendaMotor, semExportEfeitos, semExportCorCompartilhado,
-      semImportAmostra, corPaginaEnvolta, semImportApp,
+      semImportAmostra, corPaginaEnvolta, legendaEditorEnvolta, semImportApp,
     ].join('\n'));
   } catch (e) {
     erros.push(`erro ao carregar o app.js: ${e.message}`);
@@ -342,4 +373,123 @@ test('a timeline desenha n-1 marcadores de transição para n clipes', async (t)
   assert.deepEqual(erros, []);
   const marcadores = doc.querySelectorAll('#trilhaClipes .marcaTransicao');
   assert.equal(marcadores.length, 2, 'esperava 2 marcadores para 3 clipes');
+});
+
+/* ------------------------------------------------------------ UI-2: legenda */
+
+test('os cards de legenda têm o nome visível e o filtro "Venda" deixa só os 4 esperados', async (t) => {
+  const { doc, window, erros, fechar } = await montarPagina();
+  t.after(fechar);
+  assert.deepEqual(erros, []);
+
+  const cards = doc.querySelectorAll('#legendas .legPreset');
+  assert.ok(cards.length > 20, `esperava bem mais que 20 cards de legenda, veio ${cards.length}`);
+  cards.forEach((c) => {
+    assert.ok(c.querySelector('.nome')?.textContent.trim(), `card "${c.dataset.id}" sem nome visível`);
+  });
+
+  const btVenda = doc.querySelector('#filtroTagLegenda button[data-v="venda"]');
+  assert.ok(btVenda, 'botão de filtro "Venda" não existe');
+  btVenda.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  const visiveis = [...cards].filter((c) => c.style.display !== 'none').map((c) => c.dataset.id).sort();
+  assert.deepEqual(visiveis, ['dark-venda', 'emoji', 'empilhada', 'primo'].sort(),
+    `filtro "Venda" trouxe: ${visiveis.join(', ')}`);
+});
+
+test('mover o range de tamanho da legenda envia PUT /legenda com escala', async (t) => {
+  const { doc, window, erros, pedidos, fechar } = await montarPagina();
+  t.after(fechar);
+  assert.deepEqual(erros, []);
+
+  const range = doc.querySelector('#legEscala');
+  assert.ok(range, 'range de tamanho da legenda não existe');
+  range.value = '1.3';
+  range.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 350)); // debounce de 300 ms
+
+  const put = pedidos.find((p) => p.metodo === 'PUT' && /\/legenda$/.test(p.url)
+    && typeof JSON.parse(p.corpo || '{}').escala === 'number');
+  assert.ok(put, `nenhum PUT /legenda com escala. Pedidos: ${
+    pedidos.map((p) => `${p.metodo} ${p.url}`).join(', ')}`);
+  assert.equal(JSON.parse(put.corpo).escala, 1.3);
+});
+
+test('o painel de legenda desenha um chip por palavra do clipe selecionado, com destaque e oculta', async (t) => {
+  const { doc, window, erros, fechar } = await montarPagina();
+  t.after(fechar);
+  assert.deepEqual(erros, []);
+
+  const c1 = doc.querySelector('#trilhaClipes .clipe[data-id="c1"]');
+  c1.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 30));
+
+  const chips = doc.querySelectorAll('#legChips .legChip');
+  assert.equal(chips.length, PALAVRAS_C1.length, `esperava ${PALAVRAS_C1.length} chips`);
+
+  const destaque = doc.querySelector('#legChips .legChip.destaque');
+  assert.ok(destaque, 'nenhum chip com a classe "destaque"');
+  assert.match(destaque.querySelector('.legChipTexto').textContent, /importante/);
+
+  const oculta = doc.querySelector('#legChips .legChip.oculta');
+  assert.ok(oculta, 'nenhum chip com a classe "oculta"');
+});
+
+test('duplo clique num chip + Enter manda PATCH /palavras com o texto novo', async (t) => {
+  const { doc, window, erros, pedidos, fechar } = await montarPagina();
+  t.after(fechar);
+  assert.deepEqual(erros, []);
+
+  const c1 = doc.querySelector('#trilhaClipes .clipe[data-id="c1"]');
+  c1.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 30));
+
+  const chip = doc.querySelector('#legChips .legChip[data-i="0"]');
+  assert.ok(chip, 'chip 0 não existe');
+  chip.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  const input = chip.querySelector('.legChipInput');
+  assert.ok(input, 'a edição inline não abriu um input');
+  input.value = 'Esta';
+  input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await new Promise((r) => setTimeout(r, 30));
+
+  const patch = pedidos.find((p) => p.metodo === 'PATCH' && p.url.includes('/palavras')
+    && JSON.parse(p.corpo || '{}').texto === 'Esta');
+  assert.ok(patch, `nenhum PATCH /palavras com o texto novo. Pedidos: ${
+    pedidos.map((p) => `${p.metodo} ${p.url}`).join(', ')}`);
+  const corpo = JSON.parse(patch.corpo);
+  assert.equal(corpo.clipe, 'c1');
+  assert.equal(corpo.indice, 0);
+});
+
+test('o menu do chip manda POST /palavras/juntar ao clicar em "Juntar com a próxima"', async (t) => {
+  const { doc, window, erros, pedidos, fechar } = await montarPagina();
+  t.after(fechar);
+  assert.deepEqual(erros, []);
+
+  const c1 = doc.querySelector('#trilhaClipes .clipe[data-id="c1"]');
+  c1.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 30));
+
+  const chip = doc.querySelector('#legChips .legChip[data-i="0"]');
+  const menuBtn = chip.querySelector('.legChipMenu');
+  assert.ok(menuBtn, 'botão "⋯" do chip não existe');
+  menuBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  const juntarBtn = [...doc.querySelectorAll('.legMenu button')]
+    .find((b) => /juntar com a próxima/i.test(b.textContent));
+  assert.ok(juntarBtn, 'opção "Juntar com a próxima" não está no menu');
+  juntarBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 30));
+
+  const post = pedidos.find((p) => p.metodo === 'POST' && p.url.includes('/palavras/juntar'));
+  assert.ok(post, `nenhum POST /palavras/juntar. Pedidos: ${
+    pedidos.map((p) => `${p.metodo} ${p.url}`).join(', ')}`);
+  const corpo = JSON.parse(post.corpo);
+  assert.equal(corpo.clipe, 'c1');
+  assert.equal(corpo.indice, 0);
 });

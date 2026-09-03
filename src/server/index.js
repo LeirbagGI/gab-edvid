@@ -476,7 +476,10 @@ app.put('/api/projeto/:nome/legenda', (req, res) => {
   if (erros.length) return res.status(400).json({ erro: erros.join('; ') });
 
   p.estilo = p.estilo || {};
-  p.estilo.legenda = { ...(p.estilo.legenda || {}), ...corpo };
+  p.estilo.legenda = { ...(p.estilo.legenda || {}) };
+  for (const [k, v] of Object.entries(corpo)) {
+    if (v === null) delete p.estilo.legenda[k]; else p.estilo.legenda[k] = v;
+  }
   salvar(p);
   transmitir({ tipo: 'projeto', projeto: p });
   res.json(p.estilo.legenda);
