@@ -42,9 +42,8 @@ services:
     #   código-fonte do Remotion usava `swangle` como default dos renders serverless dele
     #   por essa razão). `swangle` força SwiftShader por ANGLE direto, sem essa tentativa.
     environment:
-      REMOTION_CONCURRENCY: "2"
+      REMOTION_CONCURRENCY: "3"
       EDVID_JPEG_QUALIDADE: "80"
-      EDVID_GL: "swangle"
       # C1 (sidecar transcritor — docs/implementacao/c1-transcritor.md): faster-whisper
       # bateu o whisper.cpp em velocidade e qualidade nas medições da story, então
       # WHISPER_MODO passa a transcritor por padrão. Pra voltar pro cpp (reserva —
