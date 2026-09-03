@@ -151,7 +151,7 @@ class Fila extends EventEmitter {
       } else if (item.tipo === 'refazer') {
         await refazerCorte(item.nome, { log });
       } else if (item.tipo === 'fase2') {
-        await rodarFase2(item.nome, { log });
+        await rodarFase2(item.nome, { log, qualidade: item.qualidade });
       } else {
         throw new Error(`tipo de trabalho desconhecido: ${item.tipo}`);
       }

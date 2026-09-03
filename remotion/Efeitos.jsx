@@ -1,4 +1,5 @@
 import { AbsoluteFill, OffthreadVideo, Freeze, staticFile } from 'remotion';
+import { TEXTURA_GRAO, deslocamentoGrao } from '../src/shared/efeitos.js';
 
 /**
  * Camadas e transformacoes dos efeitos por projeto/clipe (`estilo.efeitos` e
@@ -17,9 +18,13 @@ export function Camada({
   blurFundo = false,
 }) {
   const quadro = Math.max(0, Math.round(sourceFrame));
+  // `transparent: false` explicito (H3) — e o default do Remotion, mas
+  // deixamos escrito porque um video com alpha aqui seria bem mais lento de
+  // decodificar no render, e a intencao deste componente e nunca ter um.
   const video = (
     <OffthreadVideo
       src={staticFile(arquivo)}
+      transparent={false}
       style={{ width: '100%', height: '100%', objectFit: blurFundo ? 'contain' : 'cover' }}
     />
   );
@@ -37,7 +42,7 @@ export function Camada({
               position: 'absolute', inset: 0, transform: 'scale(1.3)',
               filter: 'blur(40px) brightness(.55)',
             }}>
-              <OffthreadVideo src={staticFile(arquivo)}
+              <OffthreadVideo src={staticFile(arquivo)} transparent={false}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
           )}
@@ -58,26 +63,33 @@ export function deslocamentoShake(t, intensidade = 0) {
   };
 }
 
-/** Grao de filme: ruido SVG (feTurbulence) por cima do video, opacidade proporcional a intensidade. */
+/**
+ * Grao de filme: textura de ruido PNG pre-gerada (`TEXTURA_GRAO`, calculada
+ * uma vez em src/shared/efeitos.js), repetida em mosaico com `mixBlendMode:
+ * 'overlay'` e deslocada por quadro. Antes disso era um filtro SVG
+ * (feTurbulence) recalculado a cada quadro — a troca foi o maior ganho do H3
+ * (docs/implementacao/h3-render.md): o Chromium decodifica o PNG uma vez e so
+ * recompoe o mosaico depois, em vez de rasterizar ruido fractal 30x por
+ * segundo de video.
+ */
 export function Grao({ intensidade = 0, frame = 0 }) {
   if (!intensidade) return null;
   const opacidade = Math.min(1, intensidade) * 0.5;
+  const { x, y } = deslocamentoGrao(frame);
   return (
-    <AbsoluteFill style={{ opacity: opacidade, mixBlendMode: 'overlay', pointerEvents: 'none' }}>
-      <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0 }}>
-        <filter id="edvid-grao">
-          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves={2}
-            seed={(frame % 8) + 1} stitchTiles="stitch" result="ruido" />
-          <feColorMatrix in="ruido" type="matrix"
-            values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .7 0" />
-        </filter>
-        <rect width="100%" height="100%" filter="url(#edvid-grao)" />
-      </svg>
-    </AbsoluteFill>
+    <AbsoluteFill style={{
+      opacity: opacidade,
+      mixBlendMode: 'overlay',
+      pointerEvents: 'none',
+      backgroundImage: `url(${TEXTURA_GRAO})`,
+      backgroundRepeat: 'repeat',
+      backgroundSize: '256px 256px',
+      backgroundPosition: `${x}px ${y}px`,
+    }} />
   );
 }
 
-/** Vinheta: gradiente radial escuro nas bordas. */
+/** Vinheta: gradiente radial escuro nas bordas — sem filtro, ja era barata (H3, conferido). */
 export function Vinheta({ intensidade = 0 }) {
   if (!intensidade) return null;
   const alpha = Math.min(1, intensidade) * 0.75;

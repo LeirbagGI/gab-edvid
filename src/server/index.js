@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import { PORTA_PREVIEW, PROJETOS, PASTA_ENTRADA, RE_VIDEO, EXTENSOES, OLLAMA, SAIDA } from '../shared/config.js';
 import { carregar, salvar, listar, caminhoProjeto, nomeLivre } from '../fase1/projeto.js';
 import { quadroComCor } from '../fase1/render.js';
-import { headlinePadrao, lerBroll, lerTrilha } from '../fase2/render.js';
+import { headlinePadrao, lerBroll, lerTrilha, aquecerBundle } from '../fase2/render.js';
 import { diz } from '../shared/conversa.js';
 import { LUTS, corPadrao, validarCor } from '../shared/cor.js';
 import { gerarPreview } from '../shared/preview.js';
@@ -629,7 +629,11 @@ app.post('/api/fila/:tipo', (req, res) => {
   if (!['fase1', 'fase2', 'refazer'].includes(tipo)) {
     return res.status(400).json({ erro: 'tipo invalido' });
   }
-  const item = fila.enfileirar(tipo, req.body);
+  const corpo = { ...(req.body || {}) };
+  if (tipo === 'fase2' && corpo.qualidade && !['prova', 'final'].includes(corpo.qualidade)) {
+    return res.status(400).json({ erro: 'qualidade precisa ser prova ou final' });
+  }
+  const item = fila.enfileirar(tipo, corpo);
   res.json(item);
 });
 
@@ -783,6 +787,9 @@ const servidor = app.listen(PORTA_PREVIEW, () => {
   console.log(`\n  Edvid — preview em http://localhost:${PORTA_PREVIEW}/\n`);
   // Fila persistente (A1): retoma o que ficou pendente de uma queda do servidor.
   if (typeof fila.retomar === 'function') fila.retomar();
+  // O bundle do Remotion leva ~20 s a frio; aquecer no boot tira isso do
+  // primeiro render do dia.
+  aquecerBundle().catch((e) => console.error('bundle no boot:', e.message));
   // Sessao de upload em pedacos abandonada (aba fechada no meio) some sozinha.
   uploads.limparVelhos(24);
 });

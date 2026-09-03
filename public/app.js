@@ -583,7 +583,7 @@ $('#btnAprovar').onclick = async () => {
   await fetch(`/api/projeto/${encodeURIComponent(P.nome)}/fase1/aprovar`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   await abrir(P.nome);
-  $$('.abas button')[1].click();
+  irParaAba('estilo');
 };
 $('#btnRefazer').onclick = async () => {
   await enfileirar('refazer', { nome: P.nome });
@@ -1087,11 +1087,18 @@ async function descarregarTexto() {
 guardarTexto('obs', (v) => salvarEstilo({ observacoes: v }));
 guardarTexto('headline', (v) => salvarFase2({ headline: v }));
 
+
+// Abas por nome: clicar por índice quebrou quando a aba Cor entrou no meio.
+function irParaAba(nome) {
+  const b = $$('.abas button').find((x) => x.dataset.aba === nome);
+  if (b) b.click();
+}
+
 $('#btnFase2').onclick = async () => {
   if (P.fase1?.status !== 'aprovada') {
     $('#logEtapa').textContent = 'fase 2';
     $('#logMsg').textContent = 'Aprove o corte da Fase 1 antes de renderizar.';
-    $$('.abas button')[0].click();
+    irParaAba('corte');
     return;
   }
   // Sem isto, digitar a headline e clicar em renderizar em menos de meio
@@ -1100,7 +1107,20 @@ $('#btnFase2').onclick = async () => {
   await enfileirar('fase2', { nome: P.nome });
   $('#logEtapa').textContent = 'fase 2';
   $('#logMsg').textContent = 'Render da Fase 2 na fila.';
-  $$('.abas button')[2].click();
+  irParaAba('visual');
+};
+
+$('#btnProva').onclick = async () => {
+  if (P.fase1?.status !== 'aprovada') {
+    $('#logMsg').textContent = 'Aprove o corte da Fase 1 antes de renderizar.';
+    irParaAba('corte');
+    return;
+  }
+  await descarregarTexto();
+  await enfileirar('fase2', { nome: P.nome, qualidade: 'prova' });
+  $('#logEtapa').textContent = 'prova';
+  $('#logMsg').textContent = 'Render de prova (540p) na fila; aparece na aba Visual.';
+  irParaAba('visual');
 };
 
 /* ---------------------------------------------------------------- ws */
@@ -1123,7 +1143,7 @@ ws.onmessage = (ev) => {
         listarProjetos().then(() => {
           $('#selProjeto').value = ultimo.nome;
           abrir(ultimo.nome);
-          $$('.abas button')[0].click();
+          irParaAba('corte');
         });
       } else if (P) abrir(P.nome);
     }
@@ -1171,6 +1191,13 @@ function aplicarFase2() {
     `<img src="/midia/${encodeURIComponent(P.nome)}/broll/${encodeURIComponent(b)}" alt="">`).join('');
   $('#trilhaStatus').textContent = f2.trilha || 'sem trilha';
 
+  // Render de prova (540p): aparece mesmo sem o final, e o final substitui.
+  const prova = f2.prova ? `/midia/${encodeURIComponent(P.nome)}/${f2.prova}?v=${encodeURIComponent(f2.provaEm || '')}` : null;
+  const linkProva = $('#linkProva');
+  if (linkProva) {
+    linkProva.style.display = prova ? '' : 'none';
+    linkProva.onclick = (e) => { e.preventDefault(); const v = tlVisual.player; v.dataset.src = prova; v.src = prova; v.play?.(); };
+  }
   const pronta = f2.status === 'pronta' && f2.arquivo;
   $('#visualVazio').style.display = pronta ? 'none' : '';
   $('#visualConteudo').style.display = pronta ? '' : 'none';
@@ -1383,7 +1410,7 @@ async function desenharProjetos() {
     el.onclick = () => {
       $('#selProjeto').value = el.dataset.abrir;
       abrir(el.dataset.abrir);
-      $$('.abas button')[0].click();
+      irParaAba('corte');
     };
   });
   $('#tabelaProjetos').querySelectorAll('[data-f2]').forEach((el) => {

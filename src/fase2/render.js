@@ -5,6 +5,7 @@ import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition, makeCancelSignal } from '@remotion/renderer';
 import {
   BUNDLE_DIR, REMOTION_CONCURRENCY, X264_PRESET, CRF, TIMEOUTS,
+  JPEG_QUALIDADE, GL, QUALIDADE_PADRAO,
 } from '../shared/config.js';
 import { caminhoProjeto, carregar, salvar } from '../fase1/projeto.js';
 import { gerarPicos } from '../fase1/render.js';
@@ -61,6 +62,36 @@ export function invalidarBundle() {
 }
 
 /**
+ * Aquece o bundle no boot do servidor (H3) — sem isso, quem chega primeiro
+ * depois de o processo subir paga os ~20s de empacotamento junto do proprio
+ * render. Quem monta o servidor (src/server/index.js) chama isto depois do
+ * app.listen(), sem bloquear a porta subindo; falha aqui nao impede o boot,
+ * so adia o aquecimento para o primeiro render de verdade.
+ */
+export async function aquecerBundle({ onLinha } = {}) {
+  try {
+    await prepararBundle({ onLinha });
+  } catch (e) {
+    onLinha?.(`aquecimento do bundle falhou, tenta de novo no primeiro render: ${e.message}`);
+  }
+}
+
+/**
+ * Parametros de renderMedia por qualidade (H3). `final` e o render de
+ * verdade, na resolucao e no preset de sempre. `prova` e rapido e em baixa
+ * resolucao, so para conferir efeito/legenda/transicao antes de esperar o
+ * final — nao substitui `fase2.arquivo`, grava em `fase2.prova`.
+ */
+const PARAMETROS_QUALIDADE = {
+  final: {
+    arquivo: 'fase2-final.mp4', scale: undefined, crf: CRF, x264Preset: X264_PRESET, jpegQuality: JPEG_QUALIDADE,
+  },
+  prova: {
+    arquivo: 'fase2-prova.mp4', scale: 0.5, crf: 28, x264Preset: 'ultrafast', jpegQuality: 70,
+  },
+};
+
+/**
  * O Remotion serve staticFile() de <bundle>/public e ignora o publicDir do
  * renderMedia quando o serveUrl e uma pasta local. Entao apontamos esse
  * caminho para a pasta do projeto por symlink, um projeto de cada vez.
@@ -104,8 +135,18 @@ export function lerTrilha(nome) {
 /**
  * Renderiza a Fase 2. Usa a pasta do projeto como publicDir do Remotion,
  * entao staticFile('fase1-corte.mp4') e staticFile('broll/x.jpg') funcionam.
+ *
+ * `qualidade` ('final' | 'prova', default `EDVID_QUALIDADE`/'final' — H3):
+ * 'prova' renderiza rapido em meia resolucao (`fase2-prova.mp4`) so para
+ * conferir o resultado, grava em `fase2.prova` e nao mexe em `fase2.arquivo`
+ * nem no `status` do projeto — a Fase 2 continua do jeito que estava ate o
+ * render final rodar. A fila (`{ tipo: 'fase2', qualidade }`) repassa este
+ * parametro; a rota e a UI que oferecem a escolha ficam para depois.
  */
-export async function rodarFase2(nome, { log = () => {} } = {}) {
+export async function rodarFase2(nome, { log = () => {}, qualidade } = {}) {
+  const modo = qualidade === 'prova' ? 'prova' : (qualidade === 'final' ? 'final' : QUALIDADE_PADRAO);
+  const params = PARAMETROS_QUALIDADE[modo] || PARAMETROS_QUALIDADE.final;
+
   const projeto = carregar(nome);
   if (!projeto) throw new Error(`Projeto "${nome}" nao encontrado.`);
   if (projeto.fase1?.status !== 'aprovada') {
@@ -113,15 +154,16 @@ export async function rodarFase2(nome, { log = () => {} } = {}) {
   }
 
   const pasta = caminhoProjeto(nome);
-  const saida = path.join(pasta, 'fase2-final.mp4');
+  const saida = path.join(pasta, params.arquivo);
 
-  // Completa o que a Fase 2 precisa e ainda nao foi decidido.
+  // Completa o que a Fase 2 precisa e ainda nao foi decidido. A prova nao
+  // muda o status: ela e uma conferencia, nao um render que a Fase 2 espera.
   projeto.fase2 = {
     ...projeto.fase2,
     headline: projeto.fase2?.headline ?? headlinePadrao(projeto),
     broll: lerBroll(nome),
     trilha: lerTrilha(nome),
-    status: 'renderizando',
+    ...(modo === 'final' ? { status: 'renderizando' } : {}),
   };
   salvar(projeto);
 
@@ -148,7 +190,8 @@ export async function rodarFase2(nome, { log = () => {} } = {}) {
     inputProps: { projeto },
   });
 
-  log({ etapa: 'fase2', msg: 'Renderizando a Fase 2' });
+  const msgRenderizando = modo === 'prova' ? 'Renderizando a prova' : 'Renderizando a Fase 2';
+  log({ etapa: 'fase2', msg: msgRenderizando });
   const { cancelSignal, cancel } = makeCancelSignal();
   let estourou = false;
   const temporizador = setTimeout(() => { estourou = true; cancel(); }, TIMEOUTS.render);
@@ -160,18 +203,37 @@ export async function rodarFase2(nome, { log = () => {} } = {}) {
       outputLocation: saida,
       inputProps: { projeto },
       concurrency: REMOTION_CONCURRENCY,
-      x264Preset: X264_PRESET,
-      crf: CRF,
+      x264Preset: params.x264Preset,
+      crf: params.crf,
+      scale: params.scale,
+      imageFormat: 'jpeg',
+      jpegQuality: params.jpegQuality,
+      chromiumOptions: GL ? { gl: GL } : undefined,
       cancelSignal,
       onProgress: ({ progress }) => log({
-        etapa: 'fase2', msg: 'Renderizando a Fase 2', pct: progress * 100,
+        etapa: 'fase2', msg: msgRenderizando, pct: progress * 100,
       }),
     });
   } catch (e) {
-    if (estourou) throw new Error('tempo esgotado: render da fase 2');
+    if (estourou) throw new Error(`tempo esgotado: render da fase 2${modo === 'prova' ? ' (prova)' : ''}`);
     throw e;
   } finally {
     clearTimeout(temporizador);
+  }
+
+  // A prova e so uma conferencia rapida: nao mexe na waveform, no preview
+  // nem no status da Fase 2 — quem quer o video final continua rodando
+  // 'final' normalmente, e o resultado de antes segue valendo ate la.
+  if (modo === 'prova') {
+    const atual = carregar(nome);
+    atual.fase2 = {
+      ...atual.fase2,
+      prova: path.relative(pasta, saida),
+      provaRenderizadaEm: new Date().toISOString(),
+    };
+    salvar(atual);
+    log({ etapa: 'pronto', msg: `Prova pronta — ${path.basename(saida)}` });
+    return atual;
   }
 
   // A aba Fase 2 desenha a timeline do video final, entao ela precisa da

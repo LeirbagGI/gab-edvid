@@ -28,6 +28,23 @@ services:
       - "host.docker.internal:host-gateway"
     cpus: "3"
     mem_limit: 3g
+    # H3 (desempenho do render da Fase 2 — docs/implementacao/h3-render.md):
+    #
+    # - REMOTION_CONCURRENCY=2: `cpus - 1` para os 3 vCPU acima. Não dá pra confiar no
+    #   default automático de `config.js` (`os.cpus().length - 1`) aqui dentro — o
+    #   `os.cpus()` do Node lê os cores do HOST, não o limite de cgroup do `cpus: "3"`
+    #   deste serviço, então sem isto explícito o container tentaria abrir tabs de
+    #   Chromium demais pros 3 nucleos que ele realmente tem.
+    # - EDVID_JPEG_QUALIDADE=80: mesmo default do código; explícito aqui só pra ficar
+    #   documentado junto do resto da config de render da VPS.
+    # - EDVID_GL=swangle: sem GPU nenhuma no container, deixar o Chromium "escolher
+    #   sozinho" arrisca ele tentar achar uma GPU antes de cair pro software (o próprio
+    #   código-fonte do Remotion usava `swangle` como default dos renders serverless dele
+    #   por essa razão). `swangle` força SwiftShader por ANGLE direto, sem essa tentativa.
+    environment:
+      REMOTION_CONCURRENCY: "2"
+      EDVID_JPEG_QUALIDADE: "80"
+      EDVID_GL: "swangle"
     # Opcional: sobrescrever variáveis do ENV da imagem sem rebuildar (ex.: trocar
     # WHISPER_MODO). `required: false` porque hoje não existe nenhum `.env` — sem isso o
     # `docker compose up` falharia por causa de um env_file que não existe.
