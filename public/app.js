@@ -1313,6 +1313,14 @@ async function subirVideos(arquivos) {
   const putPedaco = (id, indice, blob, nome, base) => new Promise((resolve, reject) => {
     const x = new XMLHttpRequest();
     x.open('PUT', `/api/upload/${id}/${indice}`);
+    // Blob.slice() nao herda o tipo do arquivo: sem isto o pedaco sai sem
+    // Content-Type nenhum e o parser do outro lado nao o reconhece.
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    // Toda saida do XHR tem que resolver a promessa, senao um pedaco abortado
+    // (aba em segundo plano, rede oscilando) trava o upload inteiro para sempre.
+    x.timeout = 120000;
+    x.ontimeout = () => reject(new Error(`o pedaço ${indice} passou de 2 min`));
+    x.onabort = () => reject(new Error(`o pedaço ${indice} foi cancelado`));
     x.upload.onprogress = (e) => { if (e.lengthComputable) progresso(base + e.loaded, nome); };
     x.onload = () => (x.status === 200 ? resolve() : reject(new Error(`HTTP ${x.status} no pedaço ${indice}`)));
     x.onerror = () => reject(new Error(`rede caiu no pedaço ${indice}`));
@@ -1371,20 +1379,58 @@ $('#btnLoteFase2').onclick = async () => {
   $('#logMsg').textContent = `${alvos.length} render(s) na fila`;
 };
 
+/*
+ * O painel mostra duas coisas diferentes: o que ainda vai rodar (atual +
+ * fila) e o historico do que ja terminou (feitos). Antes as duas listas
+ * saiam identicas, uma embaixo da outra, com a barra de progresso cheia nos
+ * concluidos — dava toda a impressao de que os videos tinham empacado na
+ * fila quando na verdade nao havia mais nada para rodar. Por isso o que
+ * terminou vem separado, apagado e com ✓ no lugar da barra.
+ */
 function desenharFila(estado) {
-  const linha = (i) => `
-    <div class="itemFila">
-      <span class="tipo">${{ fase1: 'FASE 1', fase2: 'FASE 2', refazer: 'REFAZER' }[i.tipo]}</span>
+  const TIPO = { fase1: 'FASE 1', fase2: 'FASE 2', refazer: 'REFAZER' };
+
+  const pendente = (i, rodando) => `
+    <div class="itemFila${rodando ? ' rodando' : ''}">
+      <span class="tipo">${TIPO[i.tipo]}</span>
+      <span class="nome">${i.nome}</span>
+      <span class="msg">${rodando ? i.msg : 'aguardando na fila'}</span>
+      <span class="mini"><i style="width:${rodando ? (i.pct || 0) : 0}%"></i></span>
+    </div>`;
+
+  const feito = (i) => `
+    <div class="itemFila feito${i.status === 'erro' ? ' falhou' : ''}">
+      <span class="tipo">${TIPO[i.tipo]}</span>
       <span class="nome">${i.nome}</span>
       <span class="msg">${i.status === 'erro' ? `⚠ ${i.msg}` : i.msg}</span>
-      <span class="mini"><i style="width:${i.pct || 0}%"></i></span>
+      <span class="marca">${i.status === 'erro' ? '✕' : '✓'}</span>
     </div>`;
 
   const { atual, fila, feitos } = estado;
-  const tudo = [atual, ...fila, ...[...feitos].reverse()].filter(Boolean);
-  $('#painelFila').innerHTML = tudo.length
-    ? tudo.map(linha).join('')
-    : '<div class="sub">Fila vazia.</div>';
+  const emEspera = [
+    ...(atual ? [pendente(atual, true)] : []),
+    ...fila.map((i) => pendente(i, false)),
+  ];
+  const prontos = [...feitos].reverse().map(feito);
+
+  const blocos = [];
+  blocos.push(emEspera.length
+    ? emEspera.join('')
+    : '<div class="sub" style="padding:.4rem 0">Nada na fila — tudo que foi enviado já terminou.</div>');
+  if (prontos.length) {
+    blocos.push(`<div class="tituloFeitos">JÁ TERMINARAM
+      <button class="linkico" id="btnLimparFeitos">limpar</button></div>`, ...prontos);
+  }
+  $('#painelFila').innerHTML = blocos.join('');
+
+  const btn = $('#btnLimparFeitos');
+  if (btn) {
+    btn.onclick = async () => {
+      await fetch('/api/fila/feitos', { method: 'DELETE' });
+      desenharFila(await (await fetch('/api/fila')).json());
+    };
+  }
+
   const pendentes = (atual ? 1 : 0) + fila.length;
   $('#contFila').textContent = pendentes || '';
   $('#chatFila').textContent = atual ? `${atual.tipo} · ${atual.msg}`.slice(0, 42)

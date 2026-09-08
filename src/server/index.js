@@ -637,6 +637,9 @@ app.post('/api/fila/:tipo', (req, res) => {
   res.json(item);
 });
 
+// Antes do /:id de proposito: 'feitos' e um nome de rota, nao um id de item.
+app.delete('/api/fila/feitos', (_req, res) => res.json({ removidos: fila.limparFeitos() }));
+
 app.delete('/api/fila/:id', (req, res) => res.json({ ok: fila.cancelar(req.params.id) }));
 
 /* ------------------------------------------------------- upload em pedacos */
@@ -662,9 +665,19 @@ app.post('/api/upload/iniciar', (req, res) => {
   }
 });
 
-// Corpo binario cru — so nesta rota. `express.json()` la em cima nao mexe
-// aqui porque so parseia quando o content-type e application/json.
-app.put('/api/upload/:id/:indice', express.raw({ type: '*/*', limit: '16mb' }), (req, res) => {
+/*
+ * Corpo binario cru — so nesta rota. `express.json()` la em cima nao mexe
+ * aqui porque so parseia quando o content-type e application/json.
+ *
+ * `type: () => true` no lugar do curinga de content-type: o navegador manda
+ * o pedaco SEM Content-Type nenhum, porque Blob.slice() nao herda o tipo do
+ * arquivo.
+ * Com a string, o body-parser usa o type-is, que responde `false` quando nao
+ * ha cabecalho de tipo — o parser era pulado, `req.body` chegava undefined e
+ * o pedaco morria com um 400 incompreensivel. A funcao ignora o type-is e
+ * parseia sempre, que e o certo aqui: esta rota so recebe binario mesmo.
+ */
+app.put('/api/upload/:id/:indice', express.raw({ type: () => true, limit: '16mb' }), (req, res) => {
   try {
     res.json(uploads.receberPedaco(req.params.id, req.params.indice, req.body));
   } catch (e) {

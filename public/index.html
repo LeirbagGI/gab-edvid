@@ -528,7 +528,17 @@
     text-overflow:ellipsis;white-space:nowrap}
   .itemFila .mini{flex:0 0 9rem;height:.3rem;background:var(--painel2);
     border-radius:.15rem;overflow:hidden}
-  .itemFila .mini i{display:block;height:100%;background:var(--laranja);width:0}
+  .itemFila .mini i{display:block;height:100%;background:var(--laranja);width:0;
+    transition:width .2s}
+  /* Quem esta rodando agora e o unico com barra viva; o resto da fila espera. */
+  .itemFila.rodando .tipo{background:var(--laranja);color:#0a0f17}
+  /* Historico: apagado e sem barra, para nao se confundir com fila de verdade. */
+  .itemFila.feito{opacity:.55}
+  .itemFila.feito .marca{flex:0 0 9rem;text-align:center;color:var(--teal);font-weight:800}
+  .itemFila.feito.falhou .marca{color:var(--rosa)}
+  .tituloFeitos{display:flex;align-items:center;gap:.7rem;margin-top:1.1rem;
+    padding-top:.9rem;border-top:1px solid var(--borda);
+    font:800 .74rem/1 sans-serif;letter-spacing:.1em;color:var(--fraco)}
 
   .linhaProj{display:flex;align-items:center;gap:.9rem;padding:.9rem 1.3rem;
     border-bottom:1px solid var(--borda);font-size:1.05rem}

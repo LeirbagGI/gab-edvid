@@ -118,6 +118,19 @@ class Fila extends EventEmitter {
     return true;
   }
 
+  /**
+   * Joga fora o que ja terminou. `feitos` e so historico — nada segura a fila
+   * por estar la — mas ele se acumula na tela ate parecer que o trabalho
+   * empacou; isto e o botao de limpar. Nao toca no que roda nem no que espera.
+   */
+  limparFeitos() {
+    const antes = this.itens.length;
+    this.itens = this.itens.filter((i) => !['pronto', 'erro'].includes(i.status));
+    const removidos = antes - this.itens.length;
+    if (removidos) this.notificar();
+    return removidos;
+  }
+
   estado() {
     return {
       atual: this.atual,

@@ -79,6 +79,13 @@ export function receberPedaco(id, indice, buffer, pasta = PASTA_ENTRADA) {
   if (!Number.isInteger(idx) || idx < 0) throw new Error('upload: índice de pedaço inválido');
   lerEstado(id, pasta); // so para confirmar que a sessao existe antes de gravar
 
+  // Sem isto o fs.writeFileSync abaixo estoura com "The \"data\" argument must
+  // be of type string or an instance of Buffer..." — mensagem que nao diz a
+  // quem le que o problema foi o corpo da requisicao nao ter chegado.
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new Error('upload: pedaço chegou vazio (corpo da requisição não recebido)');
+  }
+
   const dir = pastaSessao(id, pasta);
   const destino = path.join(dir, `${idx}.part`);
   const tmp = `${destino}.tmp`;

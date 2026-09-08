@@ -93,6 +93,33 @@ test('da para cancelar quem ainda esta na fila, mas nao quem ja roda', async () 
   restaurar();
 });
 
+test('limpar feitos tira so o historico; quem roda e quem espera ficam', async () => {
+  const { restaurar } = comDuble(async (item) => {
+    if (item.nome === 'quebrado') throw new Error('falhou de proposito');
+    await esperar(item.nome === 'demorado' ? 200 : 5);
+  });
+
+  fila.enfileirar('fase1', { nome: 'ok' });
+  fila.enfileirar('fase2', { nome: 'quebrado' });
+  fila.enfileirar('fase1', { nome: 'demorado' });
+  fila.enfileirar('fase1', { nome: 'esperando' });
+
+  // Tempo para os dois primeiros terminarem e o 'demorado' estar rodando.
+  await esperar(100);
+  assert.equal(fila.estado().feitos.length, 2, 'deveria haver 2 no historico');
+
+  assert.equal(fila.limparFeitos(), 2, 'deveria remover os 2 do historico');
+  assert.deepEqual(fila.estado().feitos, [], 'historico nao ficou vazio');
+  assert.equal(fila.atual?.nome, 'demorado', 'limpou quem estava rodando');
+  assert.deepEqual(fila.estado().fila.map((i) => i.nome), ['esperando'],
+    'limpou quem ainda esperava');
+
+  assert.equal(fila.limparFeitos(), 0, 'sem historico nao ha nada a remover');
+
+  await esperar(250);
+  restaurar();
+});
+
 // --------------------------------------------------------- persistencia
 
 /** Mesmo dublê de cima, mas instalado numa Fila nova (nao no singleton),
