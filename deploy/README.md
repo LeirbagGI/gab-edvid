@@ -20,6 +20,26 @@ sem precisar cadastrar nada). Quando o domínio definitivo tiver DNS apontado pa
 troque só o valor dentro de `Host(...)` na label `traefik.http.routers.edvid.rule` e rode
 `deploy/subir.sh` de novo.
 
+## Chave de acesso
+
+O `subir.sh` procura a chave em ordem: `$GI_VPS_CHAVE`, `~/.ssh/gi-vps`,
+`~/.ssh/id_ed25519`. Se a sua tiver outro nome:
+
+```bash
+GI_VPS_CHAVE=~/.ssh/a-sua deploy/subir.sh
+```
+
+Ele confere o acesso antes de mexer em qualquer coisa na VPS. Se a chave não
+for aceita, autorize a pública correspondente pelo console web da
+DigitalOcean (Droplets → Access → Launch Droplet Console):
+
+```bash
+mkdir -p ~/.ssh && echo '<conteúdo da sua .pub>' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+```
+
+Os comandos de diagnóstico abaixo usam `~/.ssh/gi-vps` no exemplo; troque pelo
+caminho da chave que você estiver usando.
+
 ## Subir
 
 ```bash
