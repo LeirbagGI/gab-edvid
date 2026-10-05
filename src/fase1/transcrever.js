@@ -60,9 +60,21 @@ async function transcreverViaSidecar(wav) {
 
   let resposta;
   try {
-    resposta = await fetch(url, { method: 'POST', body: forma });
-  } catch {
-    throw new Error(`transcritor nao respondeu em ${url}`);
+    resposta = await fetch(url, {
+      method: 'POST',
+      body: forma,
+      // Sem isto vale o headersTimeout padrao do undici (300 s), que e curto
+      // demais para transcricao de video longo — ainda mais quando o sidecar
+      // descarregou o modelo por ociosidade e precisa recarregar antes.
+      signal: AbortSignal.timeout(TIMEOUTS.whisper),
+    });
+  } catch (e) {
+    // O `catch` vazio de antes engolia a causa, e a mesma frase saia tanto
+    // para container fora do ar (ECONNREFUSED) quanto para transcricao que
+    // passou do tempo (UND_ERR_HEADERS_TIMEOUT / TimeoutError). Quando nao ha
+    // acesso ssh a VPS essa mensagem e a unica pista que sobra.
+    const causa = e?.cause?.code || e?.code || e?.name || e?.message;
+    throw new Error(`transcritor nao respondeu em ${url} (${causa})`);
   }
   if (!resposta.ok) {
     throw new Error(`transcritor nao respondeu em ${url} (HTTP ${resposta.status})`);
